@@ -185,6 +185,13 @@ export const productStock = (p) => {
 };
 export const sizesLabel = (sizes) => sizes.map((s) => (s.n > 1 ? `${s.size} ×${s.n}` : s.size)).join(' · ');
 
+// Return window: days left until the last day you can send it back. null = no countdown
+// (units from before this existed, or bought without a return period: returnDays 0/empty).
+export const returnDeadline = (u) => (toNum(u.returnDays) > 0 && u.purchasedAt ? addDays(u.purchasedAt, toNum(u.returnDays)) : null);
+export const returnLeft = (u) => { const dl = returnDeadline(u); return dl ? daysBetween(today(), dl) : null; };
+// The unit of a product whose return window ends first (only counting windows that are still open).
+export const nextReturn = (units) => units.map(returnLeft).filter((n) => n !== null && n >= 0).sort((a, b) => a - b)[0] ?? null;
+
 export const isStale = (u) => !u.saleId && daysBetween(u.purchasedAt, today()) >= toNum(state.settings.staleDays || 60);
 
 export const inventoryTotals = () => {
@@ -439,13 +446,13 @@ export function deleteProduct(id) {
 }
 
 // sizes: array of size strings (one per unit). cost: per unit.
-export function addUnits(productId, sizes, cost, purchasedAt = today(), note = '') {
+export function addUnits(productId, sizes, cost, purchasedAt = today(), note = '', returnDays = null) {
   const ids = [];
   update((st) => {
     sizes.forEach((size) => {
       const id = uid();
       ids.push(id);
-      st.units.push({ id, productId, size: String(size).toUpperCase(), cost: toNum(cost), purchasedAt, note, saleId: null });
+      st.units.push({ id, productId, size: String(size).toUpperCase(), cost: toNum(cost), purchasedAt, note, returnDays, saleId: null });
     });
   });
   return ids;

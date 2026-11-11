@@ -1,4 +1,4 @@
-import { esc, icon, money, signed, fmtDate, today, toNum, matches, parseSizes, sizeSort, shoeSizes, daysBetween, compressImage } from '../util.js';
+import { esc, icon, money, signed, fmtDate, today, toNum, matches, parseSizes, sizeSort, shoeSizes, daysBetween, addDays, compressImage } from '../util.js';
 import * as S from '../store.js';
 import { registerActions, productThumb, avatar, pill, empty, kpi, saleRow, rerender, openSheet, refreshSheet, closeSheet, sheetHead, toast, withUndo, go, goThen } from '../ui.js';
 import { shareProductCard } from '../share.js';
@@ -7,6 +7,15 @@ import { registerPicker, pickerHTML, searchPicker, resetPicker, catalogSizes, ca
 
 const f = { q: '', filter: '' };
 let lastQueryF = null;
+
+// Return window shown as days left. left = null means there is no countdown for that unit.
+const daysText = (left) => (left === 0 ? 'último día' : `${left} ${left === 1 ? 'día' : 'días'}`);
+const retPill = (left) => (left === null ? '' : left < 0 ? pill('Plazo vencido', '') : pill(daysText(left), left <= 3 ? 'warn' : 'ok'));
+const unitReturn = (u) => {
+  const left = S.returnLeft(u);
+  if (left !== null) return { left, until: S.returnDeadline(u) };
+  return { left: null, until: null, none: toNum(u.returnDays) === 0 && u.returnDays !== null && u.returnDays !== undefined && u.returnDays !== '' ? 'Sin devolución' : 'Sin plazo apuntado' };
+};
 
 // ---------- list ----------
 export const list = {
@@ -26,6 +35,7 @@ export const list = {
       })
       .sort((a, b) => f.filter === 'parado' ? b.st.oldestDays - a.st.oldestDays : S.productName(a.p).localeCompare(S.productName(b.p)));
     const noStockN = S.state.products.filter((p) => !S.productStock(p).count).length;
+    const closing = S.availableUnits().filter((u) => { const l = S.returnLeft(u); return l !== null && l >= 0 && l <= 7; }).length;
 
     return `
       <div class="page-head"><h1>Inventario</h1>
@@ -33,8 +43,7 @@ export const list = {
       <div class="kpis">
         ${kpi('Unidades', tot.count, `${S.state.products.filter((p) => S.productStock(p).count).length} modelos`)}
         ${kpi('Te ha costado', money(tot.cost), '')}
-        ${kpi('Valor a tu precio', money(tot.value), '')}
-        ${kpi('Beneficio si lo vendes', `<span class="${tot.latent >= 0 ? 'ok-text' : 'danger-text'}">${signed(tot.latent)}</span>`, 'antes de comisiones')}
+        ${kpi('Devolución por vencer', closing, closing ? '7 días o menos' : 'ninguna esta semana')}
       </div>
       <div class="input-wrap search-top">${icon('search')}<input class="input" id="stock-q" data-search data-input="stock-q" placeholder="Buscar modelo, SKU o talla" value="${esc(f.q)}" autocomplete="off"></div>
       <div class="chips scroll mb">
@@ -44,17 +53,15 @@ export const list = {
       </div>
       <div class="card">
         ${items.length ? `<div class="table">
-          <div class="thead"><span style="width:44px"></span><span style="flex:1">Modelo</span><span class="col-num">Uds</span><span class="col-num">Coste medio</span><span class="col-num">Tu precio</span><span class="col-num">Latente</span><span class="col-num">Días</span></div>
+          <div class="thead"><span style="width:44px"></span><span style="flex:1">Modelo</span><span class="col-num">Uds</span><span class="col-num">Coste medio</span><span class="col-num">Devolución</span></div>
           <div class="list">${items.map(({ p, st }) => {
-            const latent = st.value - st.cost;
             const stale = st.units.some(S.isStale);
+            const ret = S.nextReturn(st.units);
             return `<a class="row" href="#/producto/${p.id}">${productThumb(p)}
-              <div class="grow"><div class="title">${esc(S.productName(p))}</div><div class="meta">${st.count ? esc(S.sizesLabel(st.sizes)) : 'Sin stock'}${stale ? ` · <span class="warn-text">${st.oldestDays} días</span>` : ''}</div></div>
+              <div class="grow"><div class="title">${esc(S.productName(p))}</div><div class="meta">${st.count ? esc(S.sizesLabel(st.sizes)) : 'Sin stock'}${ret !== null ? ` · <span class="${ret <= 3 ? 'warn-text' : ''}">devolución: ${daysText(ret)}</span>` : ''}${stale ? ' · <span class="warn-text">parado</span>' : ''}</div></div>
               <div class="col-num strong">${st.count}<span class="mob-only muted small"> ${p.type === 'ropa' ? 'uds' : 'pares'}</span></div>
               <div class="col-num desk-only">${st.count ? money(st.avgCost) : '—'}</div>
-              <div class="col-num desk-only">${p.price ? money(p.price) : '—'}</div>
-              <div class="col-num desk-only ${latent >= 0 ? 'ok-text' : 'danger-text'}">${st.count ? signed(latent) : '—'}</div>
-              <div class="col-num desk-only">${st.count ? (stale ? pill(`${st.oldestDays} d`, 'warn') : `<span class="muted small">${st.oldestDays} d</span>`) : ''}</div>
+              <div class="col-num desk-only">${ret !== null ? retPill(ret) : '<span class="muted small">—</span>'}</div>
             </a>`;
           }).join('')}</div></div>`
         : S.state.products.length ? empty('search', 'Nada con este filtro', 'Prueba con otro.')
@@ -85,6 +92,7 @@ export const detail = {
     const avgNet = sold.length ? sold.reduce((a, s) => a + S.saleNet(s), 0) / sold.length : 0;
     const interested = S.interestedClients(id);
     const showMarket = S.state.settings.showMarket && p.market;
+    const retNext = S.nextReturn(st.units);
     const bySize = {};
     st.units.forEach((u) => (bySize[u.size] ||= []).push(u));
 
@@ -111,17 +119,17 @@ export const detail = {
           </div>
           <div class="kpis">
             ${kpi('En stock', st.count, st.count ? esc(S.sizesLabel(st.sizes)) : 'agotado')}
-            ${kpi('Tu precio', p.price ? money(p.price) : '—', showMarket ? `mercado ≈ ${money(p.market)}` : esc(p.sku || ''))}
-            ${kpi('Coste medio', st.count ? money(st.avgCost) : '—', st.count ? `latente <span class="${st.value - st.cost >= 0 ? 'up' : 'down'}">${signed(st.value - st.cost)}</span>` : '')}
+            ${kpi('Devolución', retNext !== null ? daysText(retNext) : '—', retNext !== null ? 'hasta que vence la primera' : st.count ? 'sin plazo apuntado' : '')}
+            ${kpi('Coste medio', st.count ? money(st.avgCost) : '—', '')}
             ${kpi('Vendidos', sold.length, sold.length ? `media ${signed(avgNet)} por venta` : 'todavía ninguno')}
           </div>
           <div class="card">
             <div class="card-head"><h2>Stock por talla</h2></div>
             ${st.count ? `<div class="list">${Object.keys(bySize).sort(sizeSort).map((size) => bySize[size].sort((a, b) => a.purchasedAt.localeCompare(b.purchasedAt)).map((u) => {
-              const days = daysBetween(u.purchasedAt, today());
+              const r = unitReturn(u);
               return `<div class="row"><div style="width:52px" class="strong">${esc(u.size)}</div>
-                <div class="grow"><div class="title">${money(u.cost)}</div><div class="meta">comprado ${fmtDate(u.purchasedAt)}${u.note ? ` · ${esc(u.note)}` : ''}</div></div>
-                ${S.isStale(u) ? pill(`${days} días`, 'warn') : `<span class="muted small">${days} d</span>`}
+                <div class="grow"><div class="title">${money(u.cost)}</div><div class="meta">${r.until ? `devolución hasta el ${fmtDate(r.until)}` : r.none}${u.note ? ` · ${esc(u.note)}` : ''}</div></div>
+                ${r.left !== null ? retPill(r.left) : `<span class="muted small">—</span>`}
                 <button class="btn ghost icon-only sm" data-act="unit-edit" data-id="${u.id}" aria-label="Editar unidad">${icon('edit', 'sm')}</button>
               </div>`;
             }).join('')).join('')}</div>` : `<p class="muted small">No te queda ninguno. <a href="#" data-act="stock-add" data-id="${id}">Añadir stock</a></p>`}
@@ -160,7 +168,7 @@ export function openAddStock(productId = null) {
   as = {
     productId, mode: productId ? 'existing' : S.state.products.length ? 'search' : 'new', q: '',
     np: { type: 'zapatilla', brand: '', model: '', sku: '', price: '', market: '', barcode: '' },
-    sizes: '', half: false, adidas: false, costMode: 'unit', cost: '', date: today(), note: '', error: '',
+    sizes: '', half: false, adidas: false, costMode: 'unit', cost: '', date: today(), note: '', returnDays: '', error: '',
     catSizes: null, catLoading: false, catError: '',
   };
   resetPicker('stock-add');
@@ -216,8 +224,7 @@ function addStockSheet() {
       ${S.state.products.length ? '<button type="button" class="chip" data-act="as-search">Buscar existente</button>' : ''}</div>
       <div class="two"><div class="field"><label for="np-b">Marca</label><input class="input" id="np-b" data-input="as-np" data-k="brand" value="${esc(np.brand)}" placeholder="${np.type === 'ropa' ? 'Essentials' : 'Jordan'}" autofocus></div>
       <div class="field"><label for="np-m">Modelo</label><input class="input" id="np-m" data-input="as-np" data-k="model" value="${esc(np.model)}" placeholder="${np.type === 'ropa' ? 'Sudadera negra' : '4 Retro Bred'}"></div></div>
-      <div class="two"><div class="field"><label for="np-p">Precio de venta</label><div class="input-wrap"><input class="input" id="np-p" inputmode="decimal" data-input="as-np" data-k="price" value="${esc(np.price)}" placeholder="0"><span class="suffix">€</span></div></div>
-      <div class="field"><label for="np-s">SKU (opcional)</label><input class="input" id="np-s" data-input="as-np" data-k="sku" value="${esc(np.sku)}" placeholder="FV5029-006" autocapitalize="characters"></div></div>
+      <div class="field"><label for="np-s">SKU (opcional)</label><input class="input" id="np-s" data-input="as-np" data-k="sku" value="${esc(np.sku)}" placeholder="FV5029-006" autocapitalize="characters"></div>
       ${S.state.settings.showMarket ? `<div class="field"><label for="np-mk">Precio de mercado (opcional)</label><div class="input-wrap"><input class="input" id="np-mk" inputmode="decimal" data-input="as-np" data-k="market" value="${esc(np.market)}" placeholder="Lo que se paga en StockX, Vinted…"><span class="suffix">€</span></div><span class="hint">Solo como referencia para no vender barato.</span></div>` : ''}`;
   }
 
@@ -239,6 +246,10 @@ function addStockSheet() {
         <span class="hint" id="as-cost-hint">${costHint(sizes, perUnit)}</span></div>
       <div class="two"><div class="field"><label for="as-date">Fecha de compra</label><input class="input" type="date" id="as-date" data-input="as-f" data-k="date" value="${as.date}"></div>
       <div class="field"><label for="as-note">Proveedor / nota</label><input class="input" id="as-note" data-input="as-f" data-k="note" value="${esc(as.note)}" placeholder="Opcional"></div></div>
+      <div class="field"><label for="as-ret">Días de devolución</label>
+        <div class="chips mb">${[14, 30, 60].map((n) => `<button type="button" class="chip ${String(as.returnDays) === String(n) ? 'on' : ''}" data-act="as-ret-chip" data-v="${n}">${n} días</button>`).join('')}<button type="button" class="chip ${String(as.returnDays) === '0' ? 'on' : ''}" data-act="as-ret-chip" data-v="0">Sin devolución</button></div>
+        <div class="input-wrap"><input class="input" id="as-ret" inputmode="numeric" data-input="as-ret" value="${esc(as.returnDays)}" placeholder="Ej.: 14"><span class="suffix">días</span></div>
+        <span class="hint" id="as-ret-hint">${retHint()}</span></div>
       ${as.error ? `<p class="error mb">${esc(as.error)}</p>` : ''}
       <div class="sheet-foot"><button class="btn primary lg block" type="submit">${sizes.length ? `Añadir ${sizes.length} ${sizes.length === 1 ? 'unidad' : 'unidades'}` : 'Añadir'}</button></div>
     </form>`;
@@ -266,6 +277,19 @@ function bumpSize(size, delta) {
 const sizesPreview = (sizes) => (sizes.length ? `${sizes.length} ${sizes.length === 1 ? 'unidad' : 'unidades'}: ${[...new Set(sizes)].sort(sizeSort).map((s) => { const n = sizes.filter((x) => x === s).length; return n > 1 ? `${s} ×${n}` : s; }).join(' · ')}` : 'Separa con comas. Usa «x2» si tienes varias de la misma talla.');
 const costHint = (sizes, perUnit) => (as.costMode === 'lot' ? (sizes.length && toNum(as.cost) ? `= ${money(perUnit, true)} por unidad` : 'Se reparte entre todas las unidades.') : sizes.length > 1 && toNum(as.cost) ? `Total: ${money(toNum(as.cost) * sizes.length)}` : '');
 
+// "Podrás devolverlo hasta el 17 nov (quedan 14 días)", worked out from the purchase date.
+const retHint = () => {
+  const raw = String(as.returnDays).trim();
+  if (raw === '') return 'Obligatorio: los días que tienes para devolverlo desde la compra. Pon 0 si no se puede devolver.';
+  const n = Math.floor(toNum(raw));
+  if (!(n >= 0)) return 'Escribe un número de días.';
+  if (n === 0) return 'Sin devolución: no habrá cuenta atrás.';
+  const until = addDays(as.date || today(), n);
+  const left = daysBetween(today(), until);
+  return `Podrás devolverlo hasta el ${fmtDate(until, true)}${left >= 0 ? ` (${left === 0 ? 'último día hoy' : `quedan ${left} ${left === 1 ? 'día' : 'días'}`})` : ' (ya vencido)'}.`;
+};
+const retValid = () => { const raw = String(as.returnDays).trim(); return raw !== '' && Math.floor(toNum(raw)) >= 0 && /^\d+$/.test(raw); };
+
 function saveStock() {
   as.error = '';
   const sizes = parseSizes(as.sizes);
@@ -273,13 +297,14 @@ function saveStock() {
   if (!productId && as.mode !== 'new') as.error = 'Elige el producto o crea uno nuevo.';
   else if (!productId && !(as.np.brand.trim() || as.np.model.trim())) as.error = 'Escribe la marca o el modelo.';
   else if (!sizes.length) as.error = 'Escribe al menos una talla.';
+  else if (!retValid()) as.error = 'Pon los días de devolución (por ejemplo 14, o 0 si no se puede devolver).';
   if (as.error) { refreshSheet(true); return; }
   if (!productId) {
     const np = as.np;
-    productId = S.saveProduct({ type: np.type, brand: np.brand.trim(), model: np.model.trim(), sku: np.sku.trim().toUpperCase(), price: toNum(np.price), market: toNum(np.market) || null, barcode: '', photos: [], notes: '', image: np.image || '', stockxSlug: np.stockxSlug || '' });
+    productId = S.saveProduct({ type: np.type, brand: np.brand.trim(), model: np.model.trim(), sku: np.sku.trim().toUpperCase(), price: 0, market: toNum(np.market) || null, barcode: '', photos: [], notes: '', image: np.image || '', stockxSlug: np.stockxSlug || '' });
   }
   const perUnit = as.costMode === 'lot' ? toNum(as.cost) / sizes.length : toNum(as.cost);
-  S.addUnits(productId, sizes, Math.round(perUnit * 100) / 100, as.date || today(), as.note.trim());
+  S.addUnits(productId, sizes, Math.round(perUnit * 100) / 100, as.date || today(), as.note.trim(), Math.floor(toNum(as.returnDays)));
   toast(`${sizes.length} ${sizes.length === 1 ? 'unidad añadida' : 'unidades añadidas'}`);
   closeSheet(false, () => go(`#/producto/${productId}`));
 }
@@ -308,6 +333,8 @@ function editUnitSheet(id) {
       <div class="two"><div class="field"><label>Talla</label><input class="input" name="size" value="${esc(u.size)}"></div>
       <div class="field"><label>Coste</label><input class="input" name="cost" inputmode="decimal" value="${u.cost}"></div></div>
       <div class="field"><label>Fecha de compra</label><input class="input" type="date" name="purchasedAt" value="${u.purchasedAt}"></div>
+      <div class="field"><label>Días de devolución</label><div class="input-wrap"><input class="input" name="returnDays" inputmode="numeric" value="${u.returnDays ?? ''}" placeholder="Ej.: 14 (0 = sin devolución)"><span class="suffix">días</span></div>
+        <span class="hint">${S.returnDeadline(u) ? `Hasta el ${fmtDate(S.returnDeadline(u), true)}.` : 'Déjalo vacío si no quieres cuenta atrás.'}</span></div>
       <div class="field"><label>Proveedor / nota</label><input class="input" name="note" value="${esc(u.note || '')}"></div>
       <div class="btn-row"><button class="btn primary lg" type="submit">Guardar</button>
       <button class="btn danger lg" type="button" data-act="unit-delete" data-id="${id}">${icon('trash')} Quitar</button></div>
@@ -339,7 +366,12 @@ registerActions({
   'as-change': () => { as.productId = null; as.mode = 'search'; as.catSizes = null; refreshSheet(true); },
   'as-type': (el) => { as.np.type = el.dataset.v; refreshSheet(true); },
   'as-np': (el) => { as.np[el.dataset.k] = el.value; },
-  'as-f': (el) => { as[el.dataset.k] = el.value; },
+  'as-f': (el) => {
+    as[el.dataset.k] = el.value;
+    if (el.dataset.k === 'date') { const h = document.getElementById('as-ret-hint'); if (h) h.textContent = retHint(); }
+  },
+  'as-ret': (el) => { as.returnDays = el.value; document.getElementById('as-ret-hint').textContent = retHint(); },
+  'as-ret-chip': (el) => { as.returnDays = el.dataset.v; refreshSheet(true); },
   'as-sizes': (el) => {
     as.sizes = el.value;
     const sizes = parseSizes(as.sizes);
@@ -388,7 +420,7 @@ registerActions({
   'unit-edit': (el) => openSheet(() => editUnitSheet(el.dataset.id)),
   'unit-save': (form) => {
     const d = Object.fromEntries(new FormData(form).entries());
-    S.editUnit(form.dataset.id, { size: d.size.trim().toUpperCase(), cost: toNum(d.cost), purchasedAt: d.purchasedAt, note: d.note.trim() });
+    S.editUnit(form.dataset.id, { size: d.size.trim().toUpperCase(), cost: toNum(d.cost), purchasedAt: d.purchasedAt, note: d.note.trim(), returnDays: /^\d+$/.test(String(d.returnDays).trim()) ? Number(d.returnDays) : null });
     closeSheet();
     toast('Unidad actualizada');
   },
