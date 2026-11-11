@@ -1,5 +1,5 @@
 // New sale in two steps: 1) pick what you sold, 2) size, client, channel, price and payment.
-import { esc, icon, money, signed, today, addDays, toNum, matches, waLink, fmtDate, sizeSort, parseSizes } from '../util.js';
+import { esc, icon, money, signed, today, addDays, toNum, matches, waLink, fmtDate, sizeSort, parseSizes, shoeSizes } from '../util.js';
 import * as S from '../store.js';
 import { registerActions, productThumb, avatar, pill, goThen, rerender, toast, marginText } from '../ui.js';
 import { openClientForm, openSale, receiptText } from '../sheets.js';
@@ -67,7 +67,6 @@ function syncPicks() {
 const typedSizes = () => (stockMode() ? [] : parseSizes(d.size));
 const pickedCount = () => (stockMode() ? pickedUnits().length : Math.max(1, typedSizes().length));
 const compactSizes = (counts) => Object.keys(counts).sort(sizeSort).map((s) => (counts[s] > 1 ? `${s}x${counts[s]}` : s)).join(', ');
-const SHOE_SIZES = Array.from({ length: 12 }, (_, i) => String(36 + i));
 const CLOTHES_SIZES = ['XS', 'S', 'M', 'L', 'XL', 'XXL'];
 const unitWord = (n, clothes) => (clothes ? (n === 1 ? 'ud' : 'uds') : n === 1 ? 'par' : 'pares');
 
@@ -166,15 +165,16 @@ function step2() {
       <p class="hint tiny muted mt">Toca una talla o el + para sumar. Solo aparecen las tallas que tienes.${nPick > 1 ? ` <b>${nPick} ${unitWord(nPick, isClothes)} en esta venta</b>: se guardan como ${nPick} ventas, cada una con su coste.` : d.unitId ? ` Coste de esta unidad: ${money(S.unit(d.unitId)?.cost)}.` : ''}</p>`;
   } else {
     const counts = typedSizes().reduce((o, s) => { o[s] = (o[s] || 0) + 1; return o; }, {});
-    const base = d.catSizes?.length ? d.catSizes : isClothes ? CLOTHES_SIZES : SHOE_SIZES;
+    const base = d.catSizes?.length ? d.catSizes : isClothes ? CLOTHES_SIZES : shoeSizes({ half: d.half, adidas: d.adidas });
     const all = [...new Set([...base.map((s) => String(s).toUpperCase()), ...Object.keys(counts)])].sort(sizeSort);
     sizeBlock = `<div class="qty-grid">${all.map((sz) => {
       const n = counts[sz] || 0;
       return `<div class="qty-cell ${n ? 'on' : ''}"><button type="button" class="qty-size" data-act="sell-pick-inc" data-v="${esc(sz)}" aria-label="Sumar una de la talla ${esc(sz)}">${esc(sz)}</button>
         <div class="qty-ctl"><button type="button" class="qty-b" data-act="sell-pick-dec" data-v="${esc(sz)}" ${n ? '' : 'disabled'} aria-label="Quitar una de la talla ${esc(sz)}">−</button><b>${n}</b><button type="button" class="qty-b" data-act="sell-pick-inc" data-v="${esc(sz)}" aria-label="Sumar una de la talla ${esc(sz)}">+</button></div></div>`;
     }).join('')}</div>
-      <label class="tiny muted mt" for="sell-size" style="display:block">¿Falta alguna talla? Escríbela aquí (por ejemplo: 42, 43x2):</label>
-      <input class="input" id="sell-size" data-input="sell-field" data-k="size" value="${esc(d.size)}" placeholder="${isClothes ? 'M, Lx2' : '42, 43x2'}" autocomplete="off">
+      ${!isClothes && !d.catSizes?.length ? `<div class="chips mt"><button type="button" class="chip ${d.half ? 'on' : ''}" data-act="sell-half">Medias tallas (40.5…)</button><button type="button" class="chip ${d.adidas ? 'on' : ''}" data-act="sell-adidas">Adidas (41 1/3…)</button></div>` : ''}
+      <label class="tiny muted mt" for="sell-size" style="display:block">¿Falta alguna talla? Escríbela aquí (por ejemplo: 42, 41 1/3, 43x2):</label>
+      <input class="input" id="sell-size" data-input="sell-field" data-k="size" value="${esc(d.size)}" placeholder="${isClothes ? 'M, Lx2' : '42, 41 1/3, 43x2'}" autocomplete="off">
       <p class="tiny muted mt">${nPick > 1 ? `<b>${nPick} ${unitWord(nPick, isClothes)} en esta venta</b>: se guardan como ${nPick} ventas.` : ''} No hay stock de este producto: toca las tallas y pon abajo lo que te costó <b>cada una</b>.</p>`;
   }
 
@@ -383,6 +383,8 @@ registerActions({
   'sell-np': (el) => { d.newProduct[el.dataset.k] = el.value; },
   'sell-back': () => { d.step = 1; d.error = ''; rerender(); },
   'sell-catsize': (el) => { d.size = el.dataset.v; d.error = ''; rerender(); },
+  'sell-half': () => { d.half = !d.half; rerender(); },
+  'sell-adidas': () => { d.adidas = !d.adidas; rerender(); },
   'sell-pick-inc': (el) => pickSize(el.dataset.v, 1),
   'sell-pick-dec': (el) => pickSize(el.dataset.v, -1),
   'sell-field': (el) => {

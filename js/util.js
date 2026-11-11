@@ -81,20 +81,36 @@ export const waLink = (phone, text = '') => {
   return `https://wa.me/${p}${text ? `?text=${encodeURIComponent(text)}` : ''}`;
 };
 
-// Sizes typed as "41, 42, 43x2" -> ['41','42','43','43']
+// "41⅓" / "41 ⅓" / "41  1/3" -> "41 1/3" (Adidas-style thirds)
+const tidySize = (s) => s.replace(/\s*⅓/g, ' 1/3').replace(/\s*⅔/g, ' 2/3').replace(/\s+/g, ' ').trim();
+// Sizes typed as "41, 42, 43x2, 41 1/3" -> ['41','42','43','43','41 1/3']
 export const parseSizes = (input) => {
   const out = [];
   String(input || '').split(/[,;\n]+/).forEach((part) => {
     const m = part.trim().match(/^(.+?)\s*(?:[x×*]\s*(\d+))?$/i);
     if (!m || !m[1].trim()) return;
     const n = Math.min(parseInt(m[2] || '1', 10), 200);
-    for (let i = 0; i < n; i++) out.push(m[1].trim().toUpperCase());
+    for (let i = 0; i < n; i++) out.push(tidySize(m[1]).toUpperCase());
   });
   return out;
 };
+// Shoe size lists for the quick grids: whole sizes, plus optional halves (40.5) and Adidas thirds (41 1/3).
+export const shoeSizes = ({ half = false, adidas = false } = {}) => {
+  const list = Array.from({ length: 12 }, (_, i) => String(36 + i));
+  if (half) for (let n = 36; n < 47; n++) list.push(`${n}.5`);
+  // Adidas EU: even sizes go up by 2/3 (36 2/3, 38 2/3…), odd ones by 1/3 (37 1/3, 39 1/3…).
+  if (adidas) { for (let n = 36; n <= 47; n++) list.push(n % 2 === 0 ? `${n} 2/3` : `${n} 1/3`); list.push('48'); }
+  return list;
+};
+// "41 1/3" -> 41.333, "40,5" -> 40.5, "42" -> 42; letters (M, XL…) -> NaN
+const sizeNum = (s) => {
+  const t = tidySize(String(s)).replace(',', '.');
+  const m = t.match(/^(\d+(?:\.\d+)?)(?:\s+(\d)\/(\d))?$/);
+  return m ? parseFloat(m[1]) + (m[2] ? Number(m[2]) / Number(m[3]) : 0) : parseFloat(t);
+};
 export const sizeSort = (a, b) => {
   const order = ['XXS', 'XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL'];
-  const na = parseFloat(String(a).replace(',', '.')), nb = parseFloat(String(b).replace(',', '.'));
+  const na = sizeNum(a), nb = sizeNum(b);
   if (Number.isFinite(na) && Number.isFinite(nb)) return na - nb;
   const ia = order.indexOf(String(a).toUpperCase()), ib = order.indexOf(String(b).toUpperCase());
   if (ia >= 0 && ib >= 0) return ia - ib;
