@@ -1,6 +1,6 @@
 ﻿// Offline support: app files are served from the network when possible (so updates arrive)
 // and from the cache when there is no connection. Data lives in IndexedDB, not here.
-const CACHE = 'solebook-v13';
+const CACHE = 'solebook-v14';
 const SHELL = [
   './', './index.html', './css/app.css', './manifest.webmanifest',
   './js/main.js', './js/util.js', './js/store.js', './js/sample.js', './js/sync.js', './js/ui.js', './js/sheets.js',

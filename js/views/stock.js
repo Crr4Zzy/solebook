@@ -111,7 +111,11 @@ export const detail = {
           </div>` : p.image ? `<div class="hero-photo cat-hero"><img src="${esc(p.image)}" alt="" referrerpolicy="no-referrer"></div>
           <div class="btn-row mb"><label class="btn sm">${icon('camera', 'sm')} Añadir foto propia<input type="file" accept="image/*" hidden data-change="photo-add" data-id="${id}"></label></div>`
           : `<label class="hero-photo empty-photo">${icon(p.type === 'ropa' ? 'shirt' : 'shoe')}<span>${icon('camera', 'sm')} Añadir foto</span><input type="file" accept="image/*" hidden data-change="photo-add" data-id="${id}"></label>
-          ${catalogEnabled() ? `<div class="card mb"><h3 class="mb">Buscar foto y tallas en StockX</h3>${pickerHTML(`product:${id}`, { title: 'Elige el modelo correcto' })}</div>` : ''}`}
+          ${catalogEnabled() ? `<div class="card mb"><h3 class="mb">Buscar foto y tallas en StockX</h3>${pickerHTML(`product:${id}`, { title: 'Elige el modelo correcto' })}</div>` : ''}
+          <div class="card mb"><h3 class="mb">Foto del producto</h3>
+            <button type="button" class="btn block" data-act="prod-find-photo" data-id="${id}">${icon('search')} Buscar foto en internet</button>
+            <div class="input-wrap mt"><input class="input" id="pd-img-url" data-input="prod-img-url" data-id="${id}" placeholder="Pega aquí el enlace de la imagen" autocomplete="off" inputmode="url" autocapitalize="off"></div>
+            <p class="tiny muted mt" id="pd-img-msg">Se abre una búsqueda con el SKU. Mantén pulsada la foto que te guste y elige «Copiar dirección de la imagen», y pégala aquí. O guarda la imagen y usa «Añadir foto».</p></div>`}
           <div class="btn-row mb">
             <a class="btn primary" href="#/vender?producto=${id}">${icon('plus')} Vender</a>
             <button class="btn" data-act="stock-add" data-id="${id}">${icon('box')} Añadir stock</button>
@@ -218,13 +222,16 @@ function addStockSheet() {
       ${pickerHTML('stock-add', { withInput: false })}`;
   } else {
     const np = as.np;
-    productBlock = `${np.image ? `<div class="cat-chosen mb">${productThumb({ image: np.image, type: np.type })}<div class="grow"><div class="title">${esc(np.stockxTitle || `${np.brand} ${np.model}`)}</div><div class="meta">De StockX${np.sku ? ` · ${esc(np.sku)}` : ''}</div></div><button type="button" class="btn sm" data-act="as-search">Cambiar</button></div>`
+    const own = np.myPhoto || np.myUrl;
+    productBlock = `${own ? `<div class="cat-chosen mb">${productThumb({ photos: np.myPhoto ? [np.myPhoto] : [], image: np.myUrl, type: np.type })}<div class="grow"><div class="title">Foto añadida</div><div class="meta">${np.myPhoto ? 'Guardada en la app' : 'Enlace de internet'}</div></div><button type="button" class="btn sm" data-act="as-photo-clear">Quitar</button></div>`
+      : np.image ? `<div class="cat-chosen mb">${productThumb({ image: np.image, type: np.type })}<div class="grow"><div class="title">${esc(np.stockxTitle || `${np.brand} ${np.model}`)}</div><div class="meta">De StockX${np.sku ? ` · ${esc(np.sku)}` : ''}</div></div><button type="button" class="btn sm" data-act="as-search">Cambiar</button></div>`
       : `<div class="mb">${pickerHTML('stock-add', { placeholder: 'Busca en StockX para rellenarlo solo…' })}</div>`}
       <div class="chips mb">${['zapatilla', 'ropa'].map((t) => `<button type="button" class="chip ${np.type === t ? 'on' : ''}" data-act="as-type" data-v="${t}">${t === 'ropa' ? 'Ropa' : 'Zapatillas'}</button>`).join('')}
       ${S.state.products.length ? '<button type="button" class="chip" data-act="as-search">Buscar existente</button>' : ''}</div>
       <div class="two"><div class="field"><label for="np-b">Marca</label><input class="input" id="np-b" data-input="as-np" data-k="brand" value="${esc(np.brand)}" placeholder="${np.type === 'ropa' ? 'Essentials' : 'Jordan'}" autofocus></div>
       <div class="field"><label for="np-m">Modelo</label><input class="input" id="np-m" data-input="as-np" data-k="model" value="${esc(np.model)}" placeholder="${np.type === 'ropa' ? 'Sudadera negra' : '4 Retro Bred'}"></div></div>
       <div class="field"><label for="np-s">SKU (opcional)</label><input class="input" id="np-s" data-input="as-np" data-k="sku" value="${esc(np.sku)}" placeholder="FV5029-006" autocapitalize="characters"><span class="hint" id="np-s-hint">${skuHint()}</span></div>
+      ${own || np.image ? '' : photoTools()}
       ${S.state.settings.showMarket ? `<div class="field"><label for="np-mk">Precio de mercado (opcional)</label><div class="input-wrap"><input class="input" id="np-mk" inputmode="decimal" data-input="as-np" data-k="market" value="${esc(np.market)}" placeholder="Lo que se paga en StockX, Vinted…"><span class="suffix">€</span></div><span class="hint">Solo como referencia para no vender barato.</span></div>` : ''}`;
   }
 
@@ -277,6 +284,60 @@ function bumpSize(size, delta) {
 const sizesPreview = (sizes) => (sizes.length ? `${sizes.length} ${sizes.length === 1 ? 'unidad' : 'unidades'}: ${[...new Set(sizes)].sort(sizeSort).map((s) => { const n = sizes.filter((x) => x === s).length; return n > 1 ? `${s} ×${n}` : s; }).join(' · ')}` : 'Separa con comas. Usa «x2» si tienes varias de la misma talla.');
 const costHint = (sizes, perUnit) => (as.costMode === 'lot' ? (sizes.length && toNum(as.cost) ? `= ${money(perUnit, true)} por unidad` : 'Se reparte entre todas las unidades.') : sizes.length > 1 && toNum(as.cost) ? `Total: ${money(toNum(as.cost) * sizes.length)}` : '');
 
+// ---------- find a photo on the internet (no account needed) ----------
+// "Buscar foto" opens an image search for the SKU/name; the user copies the image address (or saves the
+// picture) and pastes it back. A pasted link is copied INTO the app when the site allows it (so it never
+// disappears); otherwise the link itself is kept.
+const photoQuery = (...parts) => parts.map((s) => String(s || '').trim()).filter(Boolean).join(' ');
+function openPhotoSearch(q) {
+  if (!q) { toast('Escribe primero el SKU o el modelo'); return; }
+  window.open(`https://www.google.com/search?tbm=isch&q=${encodeURIComponent(q)}`, '_blank', 'noopener');
+}
+function imageFromUrl(url) {
+  return new Promise((resolve, reject) => {
+    if (!/^https?:\/\/\S{6,}$/i.test(url)) return reject(new Error('Pega el enlace completo de la imagen (empieza por https://).'));
+    const fail = () => reject(new Error('Ese enlace no es una imagen. Mantén pulsada la foto y elige «Copiar dirección de la imagen».'));
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.referrerPolicy = 'no-referrer';
+    img.onload = () => {
+      try {
+        const scale = Math.min(1, 900 / Math.max(img.width, img.height));
+        const c = document.createElement('canvas');
+        c.width = Math.round(img.width * scale); c.height = Math.round(img.height * scale);
+        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+        resolve({ photo: c.toDataURL('image/jpeg', 0.75) });
+      } catch { resolve({ image: url }); }
+    };
+    img.onerror = () => { // the site does not allow copying: check it at least shows, and keep the link
+      const plain = new Image();
+      plain.referrerPolicy = 'no-referrer';
+      plain.onload = () => resolve({ image: url });
+      plain.onerror = fail;
+      plain.src = url;
+    };
+    img.src = url;
+  });
+}
+let imgTimer;
+const photoTools = () => `<div class="field"><span class="label-t">Foto (opcional)</span>
+    <div class="btn-row"><button type="button" class="btn sm" data-act="as-find-photo">${icon('search', 'sm')} Buscar foto en internet</button>
+    <label class="btn sm">${icon('camera', 'sm')} Hacer o elegir foto<input type="file" accept="image/*" hidden data-change="as-photo"></label></div>
+    <div class="input-wrap mt"><input class="input" id="as-img-url" data-input="as-img-url" value="${esc(as.imgText || '')}" placeholder="…o pega aquí el enlace de la imagen" autocomplete="off" inputmode="url" autocapitalize="off"></div>
+    <span class="hint" id="as-img-msg">${esc(as.imgMsg || 'En la búsqueda, mantén pulsada la foto y elige «Copiar dirección de la imagen».')}</span></div>`;
+function applyImageUrl() {
+  const url = (as.imgText || '').trim();
+  if (!url) return;
+  as.imgMsg = 'Comprobando la imagen…';
+  const m = document.getElementById('as-img-msg'); if (m) m.textContent = as.imgMsg;
+  imageFromUrl(url).then((r) => {
+    if ((as.imgText || '').trim() !== url) return;
+    as.np = { ...as.np, myPhoto: r.photo || '', myUrl: r.image || '' };
+    as.imgText = ''; as.imgMsg = '';
+    refreshSheet(true);
+  }).catch((e) => { as.imgMsg = e.message; const m2 = document.getElementById('as-img-msg'); if (m2) m2.textContent = as.imgMsg; });
+}
+
 // Typing a SKU looks the model up in the StockX catalogue and fills in the photo (and sizes, brand, model if empty).
 const normSku = (s) => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 const skuHint = () => {
@@ -297,7 +358,7 @@ function lookupSku() {
     as.catSizes = null; as.skuState = '';
     refreshSheet(true);
   }
-  if (!catalogEnabled() || normSku(sku).length < 5 || as.np.image) { as.skuState = as.np.image ? as.skuState : ''; return; }
+  if (!catalogEnabled() || normSku(sku).length < 5 || as.np.image || as.np.myPhoto || as.np.myUrl) { as.skuState = as.np.image ? as.skuState : ''; return; }
   as.skuState = 'searching';
   const h = document.getElementById('np-s-hint'); if (h) h.innerHTML = skuHint();
   skuTimer = setTimeout(async () => {
@@ -343,7 +404,7 @@ function saveStock() {
   if (as.error) { refreshSheet(true); return; }
   if (!productId) {
     const np = as.np;
-    productId = S.saveProduct({ type: np.type, brand: np.brand.trim(), model: np.model.trim(), sku: np.sku.trim().toUpperCase(), price: 0, market: toNum(np.market) || null, barcode: '', photos: [], notes: '', image: np.image || '', stockxSlug: np.stockxSlug || '' });
+    productId = S.saveProduct({ type: np.type, brand: np.brand.trim(), model: np.model.trim(), sku: np.sku.trim().toUpperCase(), price: 0, market: toNum(np.market) || null, barcode: '', photos: np.myPhoto ? [np.myPhoto] : [], notes: '', image: np.myUrl || np.image || '', stockxSlug: np.stockxSlug || '' });
   }
   const perUnit = as.costMode === 'lot' ? toNum(as.cost) / sizes.length : toNum(as.cost);
   S.addUnits(productId, sizes, Math.round(perUnit * 100) / 100, as.date || today(), as.note.trim(), Math.floor(toNum(as.returnDays)));
@@ -407,6 +468,32 @@ registerActions({
   'as-size-clear': () => { as.sizes = ''; refreshSheet(true); },
   'as-change': () => { as.productId = null; as.mode = 'search'; as.catSizes = null; refreshSheet(true); },
   'as-type': (el) => { as.np.type = el.dataset.v; refreshSheet(true); },
+  'prod-find-photo': (el) => { const p = S.product(el.dataset.id); openPhotoSearch(photoQuery(p?.sku, p?.brand, p?.model)); },
+  'prod-img-url': (el) => {
+    const url = el.value.trim();
+    clearTimeout(imgTimer);
+    if (!/^https?:\/\//i.test(url)) return;
+    imgTimer = setTimeout(() => {
+      const msg = document.getElementById('pd-img-msg');
+      if (msg) msg.textContent = 'Comprobando la imagen…';
+      imageFromUrl(url).then((r) => {
+        S.saveProduct({ id: el.dataset.id, ...(r.photo ? { photos: [r.photo] } : { image: r.image }) });
+        toast('Foto añadida');
+      }).catch((e) => { const m2 = document.getElementById('pd-img-msg'); if (m2) m2.textContent = e.message; });
+    }, 500);
+  },
+  'as-find-photo': () => openPhotoSearch(photoQuery(as.np.sku, as.np.brand, as.np.model)),
+  'as-photo': async (el) => {
+    const file = el.files?.[0];
+    if (!file) return;
+    try { as.np = { ...as.np, myPhoto: await compressImage(file), myUrl: '' }; refreshSheet(true); } catch { toast('No se ha podido leer la foto'); }
+  },
+  'as-img-url': (el) => {
+    as.imgText = el.value; as.imgMsg = '';
+    clearTimeout(imgTimer);
+    if (/^https?:\/\//i.test(el.value.trim())) imgTimer = setTimeout(applyImageUrl, 500);
+  },
+  'as-photo-clear': () => { as.np = { ...as.np, myPhoto: '', myUrl: '' }; refreshSheet(true); },
   'as-np': (el) => { as.np[el.dataset.k] = el.value; if (el.dataset.k === 'sku') lookupSku(); },
   'as-f': (el) => {
     as[el.dataset.k] = el.value;
