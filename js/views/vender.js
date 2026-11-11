@@ -11,7 +11,7 @@ function pickFromCatalog(it) {
   if (existing) { chooseProduct(existing.id); rerender(); return; }
   let model = it.model || it.title;
   if (it.brand && model.toLowerCase().startsWith(it.brand.toLowerCase())) model = model.slice(it.brand.length).trim();
-  d.productId = null; d.unitId = null; d.size = ''; d.cost = '';
+  d.productId = null; d.unitId = null; d.size = ''; d.cost = ''; d.picks = {};
   d.newProduct = { type: it.type, brand: it.brand, model, sku: it.sku, image: it.image, stockxSlug: it.slug };
   d.step = 2; d.catSizes = null;
   rerender();
@@ -24,7 +24,7 @@ let d = null;
 const fresh = (query = {}) => {
   const st = S.state.settings;
   d = {
-    step: 1, q: '', productId: null, newProduct: null, size: '', unitId: null,
+    step: 1, q: '', productId: null, newProduct: null, size: '', unitId: null, picks: {},
     clientId: query.cliente || null, clientQ: '', channel: 'directo',
     price: '', cost: '', fees: 0, feesTouched: false, shippingCost: '',
     method: st.methods[0] || 'Bizum', pay: 'full', deposit: '',
@@ -43,18 +43,28 @@ function chooseProduct(id) {
   d.size = '';
   d.unitId = null;
   d.cost = '';
+  d.picks = {};
   const sizes = S.productStock(p).sizes;
-  if (sizes.length === 1) chooseSize(sizes[0].size);
+  if (sizes.length === 1) d.picks[sizes[0].size] = 1;
+  syncPicks();
   recalcFees();
 }
 
-function chooseSize(size) {
-  d.size = size;
-  // oldest unit of that size goes first
-  const u = S.availableUnits(d.productId).filter((x) => x.size === size).sort((a, b) => a.purchasedAt.localeCompare(b.purchasedAt))[0];
-  d.unitId = u?.id || null;
-  if (u) d.cost = u.cost;
+// Sizes and quantities ticked in the grid (only when the product is in stock). The oldest units go first.
+const stockMode = () => !!(d.productId && S.availableUnits(d.productId).length);
+function pickedUnits() {
+  if (!stockMode()) return [];
+  const avail = S.availableUnits(d.productId);
+  return Object.keys(d.picks).sort(sizeSort).flatMap((size) => avail.filter((u) => u.size === size).sort((a, b) => a.purchasedAt.localeCompare(b.purchasedAt)).slice(0, d.picks[size]));
 }
+// One unit picked: behaves like a single sale (cost editable). Several: each unit keeps its own cost.
+function syncPicks() {
+  const units = pickedUnits();
+  if (units.length === 1) { d.size = units[0].size; d.unitId = units[0].id; d.cost = units[0].cost; }
+  else { d.size = ''; d.unitId = null; d.cost = ''; }
+}
+const pickedCount = () => (stockMode() ? pickedUnits().length : 1);
+const unitWord = (n, clothes) => (clothes ? (n === 1 ? 'ud' : 'uds') : n === 1 ? 'par' : 'pares');
 
 function recalcFees() {
   if (!d.feesTouched) d.fees = S.calcFees(d.channel, toNum(d.price));
@@ -135,12 +145,20 @@ function step2() {
   const c = S.client(d.clientId);
   const ch = S.channel(d.channel);
   const isClothes = (p?.type || np?.type) === 'ropa';
+  const nUnits = pickedCount();
+  const multi = nUnits > 1;
 
   // sizes: only those in stock, with how many you have
   let sizeBlock;
   if (p && stock.count) {
-    sizeBlock = `<div class="choices">${stock.sizes.map((s) => `<button type="button" class="choice ${d.size === s.size ? 'on' : ''}" data-act="sell-size" data-v="${esc(s.size)}">${esc(s.size)}<small>${s.n} ${isClothes ? (s.n === 1 ? 'ud' : 'uds') : s.n === 1 ? 'par' : 'pares'}</small></button>`).join('')}</div>
-      <p class="hint tiny muted mt">Solo aparecen las tallas que tienes.${d.unitId ? ` Coste de esta unidad: ${money(S.unit(d.unitId)?.cost)}.` : ''}</p>`;
+    const nPick = pickedCount();
+    sizeBlock = `<div class="qty-grid">${stock.sizes.map((s) => {
+      const n = d.picks[s.size] || 0;
+      return `<div class="qty-cell ${n ? 'on' : ''}"><button type="button" class="qty-size" data-act="sell-pick-inc" data-v="${esc(s.size)}" aria-label="Sumar una de la talla ${esc(s.size)}">${esc(s.size)}</button>
+        <span class="qty-av">hay ${s.n}</span>
+        <div class="qty-ctl"><button type="button" class="qty-b" data-act="sell-pick-dec" data-v="${esc(s.size)}" ${n ? '' : 'disabled'} aria-label="Quitar una de la talla ${esc(s.size)}">−</button><b>${n}</b><button type="button" class="qty-b" data-act="sell-pick-inc" data-v="${esc(s.size)}" ${n >= s.n ? 'disabled' : ''} aria-label="Sumar una de la talla ${esc(s.size)}">+</button></div></div>`;
+    }).join('')}</div>
+      <p class="hint tiny muted mt">Toca una talla o el + para sumar. Solo aparecen las tallas que tienes.${nPick > 1 ? ` <b>${nPick} ${unitWord(nPick, isClothes)} en esta venta</b>: se guardan como ${nPick} ventas, cada una con su coste.` : d.unitId ? ` Coste de esta unidad: ${money(S.unit(d.unitId)?.cost)}.` : ''}</p>`;
   } else {
     sizeBlock = `${d.catSizes?.length ? `<div class="size-pick mb">${d.catSizes.map((sz) => `<button type="button" class="size-chip ${d.size === sz ? 'on' : ''}" data-act="sell-catsize" data-v="${esc(sz)}">${esc(sz)}</button>`).join('')}</div>` : ''}<input class="input" id="sell-size" data-input="sell-field" data-k="size" value="${esc(d.size)}" placeholder="${isClothes ? 'M' : '43'}" autocomplete="off">
       <p class="tiny muted mt">${d.catSizes?.length ? 'No lo tienes en stock: toca la talla (o escríbela) y pon abajo lo que te costó.' : 'No hay stock de este producto: escribe la talla y el coste a mano.'}</p>`;
@@ -188,10 +206,11 @@ function step2() {
         <div class="chips">${chans.map((x) => `<button type="button" class="chip ${d.channel === x.id ? 'on' : ''}" data-act="sell-channel" data-v="${x.id}">${esc(x.name)}</button>`).join('')}
         ${plats.map((x) => `<button type="button" class="chip ${d.channel === x.id ? 'on' : ''}" data-act="sell-channel" data-v="${x.id}">${esc(x.name)}</button>`).join('')}</div></div>
       <div class="two">
-        <div class="field"><label for="sell-price">Precio de venta</label><div class="input-wrap"><input class="input" id="sell-price" inputmode="decimal" data-input="sell-field" data-k="price" value="${esc(d.price)}" placeholder="0"><span class="suffix">€</span></div>${priceHint ? `<span class="hint">${esc(priceHint)}</span>` : ''}</div>
-        <div class="field"><label for="sell-cost">Lo que te costó</label><div class="input-wrap"><input class="input" id="sell-cost" inputmode="decimal" data-input="sell-field" data-k="cost" value="${esc(d.cost)}" placeholder="0"><span class="suffix">€</span></div></div>
+        <div class="field"><label for="sell-price">${multi ? 'Precio por unidad' : 'Precio de venta'}</label><div class="input-wrap"><input class="input" id="sell-price" inputmode="decimal" data-input="sell-field" data-k="price" value="${esc(d.price)}" placeholder="0"><span class="suffix">€</span></div>${priceHint ? `<span class="hint">${esc(priceHint)}</span>` : ''}</div>
+        <div class="field"><label for="sell-cost">${multi ? 'Lo que te costaron' : 'Lo que te costó'}</label>${multi ? `<div class="input-wrap"><input class="input" id="sell-cost" value="${esc(money(pickedUnits().reduce((a, u) => a + toNum(u.cost), 0), true))}" disabled></div><span class="hint">Suma del coste de cada unidad.</span>`
+          : `<div class="input-wrap"><input class="input" id="sell-cost" inputmode="decimal" data-input="sell-field" data-k="cost" value="${esc(d.cost)}" placeholder="0"><span class="suffix">€</span></div>`}</div>
       </div>
-      ${showFees ? `<div class="field"><label for="sell-fees">Comisión ${esc(ch.name)}</label><div class="input-wrap"><input class="input" id="sell-fees" inputmode="decimal" data-input="sell-fees" value="${esc(d.fees)}"><span class="suffix">€</span></div><span class="hint">${toNum(ch.feePct)}%${toNum(ch.feeFixed) ? ` + ${money(ch.feeFixed)}` : ''}. Cámbiala en Ajustes si no es correcta.</span></div>` : ''}
+      ${showFees ? `<div class="field"><label for="sell-fees">Comisión ${esc(ch.name)}${multi ? ' (por unidad)' : ''}</label><div class="input-wrap"><input class="input" id="sell-fees" inputmode="decimal" data-input="sell-fees" value="${esc(d.fees)}"><span class="suffix">€</span></div><span class="hint">${toNum(ch.feePct)}%${toNum(ch.feeFixed) ? ` + ${money(ch.feeFixed)}` : ''}. Cámbiala en Ajustes si no es correcta.</span></div>` : ''}
     </div>
 
     <div class="card mt">
@@ -208,7 +227,7 @@ function step2() {
     <details class="card mt" ${d.moreOpen || d.notes || toNum(d.shippingCost) || d.date !== today() ? 'open' : ''}>
       <summary class="strong" style="cursor:pointer" data-act="sell-more">Más opciones</summary>
       <div class="two mt"><div class="field"><label for="sell-date">Fecha</label><input class="input" type="date" id="sell-date" data-input="sell-field" data-k="date" value="${d.date}"></div>
-      <div class="field"><label for="sell-ship">Envío pagado por ti</label><div class="input-wrap"><input class="input" id="sell-ship" inputmode="decimal" data-input="sell-field" data-k="shippingCost" value="${esc(d.shippingCost)}" placeholder="0"><span class="suffix">€</span></div></div></div>
+      <div class="field"><label for="sell-ship">Envío pagado por ti</label><div class="input-wrap"><input class="input" id="sell-ship" inputmode="decimal" data-input="sell-field" data-k="shippingCost" value="${esc(d.shippingCost)}" placeholder="0"><span class="suffix">€</span></div>${multi ? '<span class="hint">De todo el pedido; se apunta en la primera venta.</span>' : ''}</div></div>
       <div class="field" style="margin:0"><label for="sell-notes">Notas</label><textarea class="input" id="sell-notes" data-input="sell-field" data-k="notes" placeholder="Viene a recoger el sábado…">${esc(d.notes)}</textarea></div>
     </details>
 
@@ -216,7 +235,7 @@ function step2() {
     ${d.error ? `<p class="error mt">${esc(d.error)}</p>` : ''}
     <div class="sell-foot">
       <div class="btn-row" style="flex-wrap:nowrap">
-        <button class="btn primary lg" type="submit" style="flex:1">Guardar venta</button>
+        <button class="btn primary lg" type="submit" style="flex:1">${multi ? `Guardar ${nUnits} ventas` : 'Guardar venta'}</button>
         ${c?.phone ? `<button type="button" class="btn lg wa" style="flex:none" data-act="sell-save-wa" title="Guardar y enviar recibo por WhatsApp">${icon('wa')}<span class="desk-only">Guardar y enviar recibo</span></button>` : ''}
       </div>
     </div>
@@ -225,11 +244,14 @@ function step2() {
 
 function summary() {
   const price = toNum(d.price);
-  const net = price - toNum(d.fees) - toNum(d.shippingCost) - toNum(d.cost);
-  const paid = d.pay === 'full' ? price : d.pay === 'deposit' ? toNum(d.deposit) : 0;
-  const owed = Math.max(0, price - paid);
+  const n = pickedCount();
+  const total = price * n;
+  const cost = n > 1 ? pickedUnits().reduce((a, u) => a + toNum(u.cost), 0) : toNum(d.cost);
+  const net = total - toNum(d.fees) * n - toNum(d.shippingCost) - cost;
+  const paid = d.pay === 'full' ? total : d.pay === 'deposit' ? Math.min(toNum(d.deposit), total) : 0;
+  const owed = Math.max(0, total - paid);
   if (!price) return '';
-  return `<div class="net-box ${net < 0 ? 'neg' : ''}"><span>Beneficio neto</span><span>${signed(net, true)} · ${marginText(net, price)}</span></div>
+  return `${n > 1 ? `<div class="owed-box mb" style="background:var(--card);border:1px solid var(--border)"><span>${n} unidades × ${money(price, true)}</span><span>${money(total, true)}</span></div>` : ''}<div class="net-box ${net < 0 ? 'neg' : ''}"><span>Beneficio neto</span><span>${signed(net, true)} · ${marginText(net, total)}</span></div>
     ${owed > 0 ? `<div class="owed-box mt"><span>Quedará por cobrar</span><span>${money(owed, true)}</span></div>` : ''}`;
 }
 const refreshSummary = () => {
@@ -242,10 +264,33 @@ function save() {
   const price = toNum(d.price);
   const p = d.productId ? S.product(d.productId) : null;
   if (d.newProduct && !(d.newProduct.brand.trim() || d.newProduct.model.trim())) d.error = 'Escribe la marca o el modelo.';
-  else if (!String(d.size).trim()) d.error = 'Elige la talla.';
+  else if (stockMode() ? !pickedUnits().length : !String(d.size).trim()) d.error = 'Elige la talla.';
   else if (price <= 0) d.error = 'Pon el precio de venta.';
   else if (d.pay === 'deposit' && toNum(d.deposit) <= 0) d.error = 'Escribe cuánto te ha dado de señal.';
   if (d.error) { rerender(); return null; }
+
+  const units = pickedUnits();
+  if (units.length > 1) {
+    // Several sizes/quantities at once: one sale per unit, same client, channel, date and payment method.
+    let depositLeft = d.pay === 'deposit' ? toNum(d.deposit) : 0;
+    const sales = units.map((u, i) => {
+      const paid = d.pay === 'full' ? price : d.pay === 'deposit' ? Math.min(depositLeft, price) : 0;
+      depositLeft -= d.pay === 'deposit' ? paid : 0;
+      return S.createSale({
+        productId: d.productId, unitId: u.id, size: u.size, clientId: d.clientId, channel: d.channel,
+        price, cost: toNum(u.cost), fees: toNum(d.fees), shippingCost: i === 0 ? toNum(d.shippingCost) : 0,
+        payments: paid ? [{ amount: paid, method: d.method, date: d.date }] : [], method: d.method,
+        delivery: d.delivery, reservedUntil: d.reservedUntil, date: d.date || today(), notes: d.notes.trim(),
+      });
+    });
+    const c = S.client(d.clientId);
+    const prod = S.product(d.productId);
+    (c?.wishes || []).filter((w) => matches(`${prod.brand} ${prod.model} ${prod.sku || ''}`, w.text)).forEach((w) => S.removeWish(c.id, w.id));
+    d = null;
+    toast(`${sales.length} ventas guardadas`);
+    goThen('#/ventas', () => {});
+    return sales;
+  }
 
   let productId = d.productId;
   if (d.newProduct) productId = S.saveProduct({ type: d.newProduct.type, brand: d.newProduct.brand.trim(), model: d.newProduct.model.trim(), price, sku: d.newProduct.sku || '', photos: [], image: d.newProduct.image || '', stockxSlug: d.newProduct.stockxSlug || '' });
@@ -263,7 +308,34 @@ function save() {
   d = null;
   toast('Venta guardada');
   goThen('#/ventas', () => openSale(s.id));
-  return s;
+  return [s];
+}
+
+// One WhatsApp receipt for an order of several units.
+function multiReceipt(sales) {
+  const st = S.state.settings;
+  const p = S.product(sales[0].productId);
+  const bySize = {};
+  sales.forEach((s) => { bySize[s.size] = (bySize[s.size] || 0) + 1; });
+  const total = sales.reduce((a, s) => a + s.price, 0);
+  const paid = sales.reduce((a, s) => a + S.salePaid(s), 0);
+  const owed = sales.reduce((a, s) => a + S.saleOwed(s), 0);
+  return [
+    `*${st.businessName}*`, `Recibo · ${fmtDate(sales[0].date, true)}`, '',
+    S.productName(p),
+    ...Object.keys(bySize).sort(sizeSort).map((size) => `· talla ${size}${bySize[size] > 1 ? ` ×${bySize[size]}` : ''} · ${money(sales[0].price)} c/u`),
+    `Total: ${money(total)}`, `Pagado: ${money(paid)}`, owed > 0 ? `Pendiente: ${money(owed)}` : '',
+    '', st.receiptFooter || '',
+  ].filter((l, i, a) => l !== '' || (a[i - 1] !== '' && i > 0)).join('\n').trim();
+}
+
+function pickSize(size, delta) {
+  const have = S.availableUnits(d.productId).filter((u) => u.size === size).length;
+  const n = Math.max(0, Math.min(have, (d.picks[size] || 0) + delta));
+  if (n) d.picks[size] = n; else delete d.picks[size];
+  syncPicks();
+  d.error = '';
+  rerender();
 }
 
 registerActions({
@@ -272,7 +344,7 @@ registerActions({
   'sell-scan-stop': () => { d.scanning = false; stopScanner(); rerender(); },
   'sell-product': (el) => { stopScanner(); d.scanning = false; chooseProduct(el.dataset.id); rerender(); window.scrollTo(0, 0); },
   'sell-new-product': () => {
-    d.productId = null; d.unitId = null; d.size = ''; d.cost = '';
+    d.productId = null; d.unitId = null; d.size = ''; d.cost = ''; d.picks = {};
     const q = d.q.trim();
     const [brand, ...rest] = q.split(/\s+/);
     d.newProduct = { type: 'zapatilla', brand: q ? brand : '', model: rest.join(' ') };
@@ -283,7 +355,8 @@ registerActions({
   'sell-np': (el) => { d.newProduct[el.dataset.k] = el.value; },
   'sell-back': () => { d.step = 1; d.error = ''; rerender(); },
   'sell-catsize': (el) => { d.size = el.dataset.v; d.error = ''; rerender(); },
-  'sell-size': (el) => { chooseSize(el.dataset.v); d.error = ''; rerender(); },
+  'sell-pick-inc': (el) => pickSize(el.dataset.v, 1),
+  'sell-pick-dec': (el) => pickSize(el.dataset.v, -1),
   'sell-field': (el) => {
     d[el.dataset.k] = el.value;
     if (el.dataset.k === 'price') recalcFees();
@@ -317,7 +390,7 @@ registerActions({
   'sell-save': () => save(),
   'sell-save-wa': () => {
     const c = S.client(d.clientId);
-    const s = save();
-    if (s && c?.phone) window.open(waLink(c.phone, receiptText(s)), '_blank', 'noopener');
+    const sales = save();
+    if (sales && c?.phone) window.open(waLink(c.phone, sales.length > 1 ? multiReceipt(sales) : receiptText(sales[0])), '_blank', 'noopener');
   },
 });

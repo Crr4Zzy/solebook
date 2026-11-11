@@ -426,3 +426,4 @@ details[open] > summary::after { content: "−"; }
 .qty-ctl b { font-size: 15px; min-width: 20px; text-align: center; }
 .qty-b { border: 0; background: transparent; color: inherit; font: inherit; font-size: 20px; line-height: 1; width: 36px; min-height: 40px; cursor: pointer; }
 .qty-b:disabled { opacity: .3; cursor: default; }
+.qty-av { font-size: 11px; color: var(--muted); text-align: center; padding-bottom: 4px; margin-top: -4px; }
