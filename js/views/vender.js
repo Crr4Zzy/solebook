@@ -1,5 +1,5 @@
 // New sale in two steps: 1) pick what you sold, 2) size, client, channel, price and payment.
-import { esc, icon, money, signed, today, addDays, toNum, matches, waLink, fmtDate, sizeSort } from '../util.js';
+import { esc, icon, money, signed, today, addDays, toNum, matches, waLink, fmtDate, sizeSort, parseSizes } from '../util.js';
 import * as S from '../store.js';
 import { registerActions, productThumb, avatar, pill, goThen, rerender, toast, marginText } from '../ui.js';
 import { openClientForm, openSale, receiptText } from '../sheets.js';
@@ -63,7 +63,12 @@ function syncPicks() {
   if (units.length === 1) { d.size = units[0].size; d.unitId = units[0].id; d.cost = units[0].cost; }
   else { d.size = ''; d.unitId = null; d.cost = ''; }
 }
-const pickedCount = () => (stockMode() ? pickedUnits().length : 1);
+// Without stock the sizes are typed (or tapped in the grid) as text like "42, 43x2": one sale per unit.
+const typedSizes = () => (stockMode() ? [] : parseSizes(d.size));
+const pickedCount = () => (stockMode() ? pickedUnits().length : Math.max(1, typedSizes().length));
+const compactSizes = (counts) => Object.keys(counts).sort(sizeSort).map((s) => (counts[s] > 1 ? `${s}x${counts[s]}` : s)).join(', ');
+const SHOE_SIZES = Array.from({ length: 12 }, (_, i) => String(36 + i));
+const CLOTHES_SIZES = ['XS', 'S', 'M', 'L', 'XL', 'XXL'];
 const unitWord = (n, clothes) => (clothes ? (n === 1 ? 'ud' : 'uds') : n === 1 ? 'par' : 'pares');
 
 function recalcFees() {
@@ -150,8 +155,8 @@ function step2() {
 
   // sizes: only those in stock, with how many you have
   let sizeBlock;
+  const nPick = nUnits;
   if (p && stock.count) {
-    const nPick = pickedCount();
     sizeBlock = `<div class="qty-grid">${stock.sizes.map((s) => {
       const n = d.picks[s.size] || 0;
       return `<div class="qty-cell ${n ? 'on' : ''}"><button type="button" class="qty-size" data-act="sell-pick-inc" data-v="${esc(s.size)}" aria-label="Sumar una de la talla ${esc(s.size)}">${esc(s.size)}</button>
@@ -160,8 +165,17 @@ function step2() {
     }).join('')}</div>
       <p class="hint tiny muted mt">Toca una talla o el + para sumar. Solo aparecen las tallas que tienes.${nPick > 1 ? ` <b>${nPick} ${unitWord(nPick, isClothes)} en esta venta</b>: se guardan como ${nPick} ventas, cada una con su coste.` : d.unitId ? ` Coste de esta unidad: ${money(S.unit(d.unitId)?.cost)}.` : ''}</p>`;
   } else {
-    sizeBlock = `${d.catSizes?.length ? `<div class="size-pick mb">${d.catSizes.map((sz) => `<button type="button" class="size-chip ${d.size === sz ? 'on' : ''}" data-act="sell-catsize" data-v="${esc(sz)}">${esc(sz)}</button>`).join('')}</div>` : ''}<input class="input" id="sell-size" data-input="sell-field" data-k="size" value="${esc(d.size)}" placeholder="${isClothes ? 'M' : '43'}" autocomplete="off">
-      <p class="tiny muted mt">${d.catSizes?.length ? 'No lo tienes en stock: toca la talla (o escríbela) y pon abajo lo que te costó.' : 'No hay stock de este producto: escribe la talla y el coste a mano.'}</p>`;
+    const counts = typedSizes().reduce((o, s) => { o[s] = (o[s] || 0) + 1; return o; }, {});
+    const base = d.catSizes?.length ? d.catSizes : isClothes ? CLOTHES_SIZES : SHOE_SIZES;
+    const all = [...new Set([...base.map((s) => String(s).toUpperCase()), ...Object.keys(counts)])].sort(sizeSort);
+    sizeBlock = `<div class="qty-grid">${all.map((sz) => {
+      const n = counts[sz] || 0;
+      return `<div class="qty-cell ${n ? 'on' : ''}"><button type="button" class="qty-size" data-act="sell-pick-inc" data-v="${esc(sz)}" aria-label="Sumar una de la talla ${esc(sz)}">${esc(sz)}</button>
+        <div class="qty-ctl"><button type="button" class="qty-b" data-act="sell-pick-dec" data-v="${esc(sz)}" ${n ? '' : 'disabled'} aria-label="Quitar una de la talla ${esc(sz)}">−</button><b>${n}</b><button type="button" class="qty-b" data-act="sell-pick-inc" data-v="${esc(sz)}" aria-label="Sumar una de la talla ${esc(sz)}">+</button></div></div>`;
+    }).join('')}</div>
+      <label class="tiny muted mt" for="sell-size" style="display:block">¿Falta alguna talla? Escríbela aquí (por ejemplo: 42, 43x2):</label>
+      <input class="input" id="sell-size" data-input="sell-field" data-k="size" value="${esc(d.size)}" placeholder="${isClothes ? 'M, Lx2' : '42, 43x2'}" autocomplete="off">
+      <p class="tiny muted mt">${nPick > 1 ? `<b>${nPick} ${unitWord(nPick, isClothes)} en esta venta</b>: se guardan como ${nPick} ventas.` : ''} No hay stock de este producto: toca las tallas y pon abajo lo que te costó <b>cada una</b>.</p>`;
   }
 
   // client picker
@@ -207,7 +221,7 @@ function step2() {
         ${plats.map((x) => `<button type="button" class="chip ${d.channel === x.id ? 'on' : ''}" data-act="sell-channel" data-v="${x.id}">${esc(x.name)}</button>`).join('')}</div></div>
       <div class="two">
         <div class="field"><label for="sell-price">${multi ? 'Precio por unidad' : 'Precio de venta'}</label><div class="input-wrap"><input class="input" id="sell-price" inputmode="decimal" data-input="sell-field" data-k="price" value="${esc(d.price)}" placeholder="0"><span class="suffix">€</span></div>${priceHint ? `<span class="hint">${esc(priceHint)}</span>` : ''}</div>
-        <div class="field"><label for="sell-cost">${multi ? 'Lo que te costaron' : 'Lo que te costó'}</label>${multi ? `<div class="input-wrap"><input class="input" id="sell-cost" value="${esc(money(pickedUnits().reduce((a, u) => a + toNum(u.cost), 0), true))}" disabled></div><span class="hint">Suma del coste de cada unidad.</span>`
+        <div class="field"><label for="sell-cost">${multi ? (stockMode() ? 'Lo que te costaron' : 'Lo que te costó cada una') : 'Lo que te costó'}</label>${multi && stockMode() ? `<div class="input-wrap"><input class="input" id="sell-cost" value="${esc(money(pickedUnits().reduce((a, u) => a + toNum(u.cost), 0), true))}" disabled></div><span class="hint">Suma del coste de cada unidad.</span>`
           : `<div class="input-wrap"><input class="input" id="sell-cost" inputmode="decimal" data-input="sell-field" data-k="cost" value="${esc(d.cost)}" placeholder="0"><span class="suffix">€</span></div>`}</div>
       </div>
       ${showFees ? `<div class="field"><label for="sell-fees">Comisión ${esc(ch.name)}${multi ? ' (por unidad)' : ''}</label><div class="input-wrap"><input class="input" id="sell-fees" inputmode="decimal" data-input="sell-fees" value="${esc(d.fees)}"><span class="suffix">€</span></div><span class="hint">${toNum(ch.feePct)}%${toNum(ch.feeFixed) ? ` + ${money(ch.feeFixed)}` : ''}. Cámbiala en Ajustes si no es correcta.</span></div>` : ''}
@@ -246,7 +260,7 @@ function summary() {
   const price = toNum(d.price);
   const n = pickedCount();
   const total = price * n;
-  const cost = n > 1 ? pickedUnits().reduce((a, u) => a + toNum(u.cost), 0) : toNum(d.cost);
+  const cost = stockMode() ? (n > 1 ? pickedUnits().reduce((a, u) => a + toNum(u.cost), 0) : toNum(d.cost)) : toNum(d.cost) * n;
   const net = total - toNum(d.fees) * n - toNum(d.shippingCost) - cost;
   const paid = d.pay === 'full' ? total : d.pay === 'deposit' ? Math.min(toNum(d.deposit), total) : 0;
   const owed = Math.max(0, total - paid);
@@ -264,27 +278,33 @@ function save() {
   const price = toNum(d.price);
   const p = d.productId ? S.product(d.productId) : null;
   if (d.newProduct && !(d.newProduct.brand.trim() || d.newProduct.model.trim())) d.error = 'Escribe la marca o el modelo.';
-  else if (stockMode() ? !pickedUnits().length : !String(d.size).trim()) d.error = 'Elige la talla.';
+  else if (stockMode() ? !pickedUnits().length : !typedSizes().length) d.error = 'Elige la talla.';
   else if (price <= 0) d.error = 'Pon el precio de venta.';
   else if (d.pay === 'deposit' && toNum(d.deposit) <= 0) d.error = 'Escribe cuánto te ha dado de señal.';
   if (d.error) { rerender(); return null; }
 
+  let productId = d.productId;
+  if (d.newProduct) productId = S.saveProduct({ type: d.newProduct.type, brand: d.newProduct.brand.trim(), model: d.newProduct.model.trim(), price, sku: d.newProduct.sku || '', photos: [], image: d.newProduct.image || '', stockxSlug: d.newProduct.stockxSlug || '' });
+
+  // Several sizes/quantities at once: one sale per unit, same client, channel, date and payment method.
   const units = pickedUnits();
-  if (units.length > 1) {
-    // Several sizes/quantities at once: one sale per unit, same client, channel, date and payment method.
+  const typed = typedSizes();
+  const lines = units.length > 1 ? units.map((u) => ({ unitId: u.id, size: u.size, cost: toNum(u.cost) }))
+    : typed.length > 1 ? typed.map((size) => ({ unitId: null, size, cost: toNum(d.cost) })) : null;
+  if (lines) {
     let depositLeft = d.pay === 'deposit' ? toNum(d.deposit) : 0;
-    const sales = units.map((u, i) => {
+    const sales = lines.map((ln, i) => {
       const paid = d.pay === 'full' ? price : d.pay === 'deposit' ? Math.min(depositLeft, price) : 0;
       depositLeft -= d.pay === 'deposit' ? paid : 0;
       return S.createSale({
-        productId: d.productId, unitId: u.id, size: u.size, clientId: d.clientId, channel: d.channel,
-        price, cost: toNum(u.cost), fees: toNum(d.fees), shippingCost: i === 0 ? toNum(d.shippingCost) : 0,
+        productId, unitId: ln.unitId, size: ln.size, clientId: d.clientId, channel: d.channel,
+        price, cost: ln.cost, fees: toNum(d.fees), shippingCost: i === 0 ? toNum(d.shippingCost) : 0,
         payments: paid ? [{ amount: paid, method: d.method, date: d.date }] : [], method: d.method,
         delivery: d.delivery, reservedUntil: d.reservedUntil, date: d.date || today(), notes: d.notes.trim(),
       });
     });
     const c = S.client(d.clientId);
-    const prod = S.product(d.productId);
+    const prod = S.product(productId);
     (c?.wishes || []).filter((w) => matches(`${prod.brand} ${prod.model} ${prod.sku || ''}`, w.text)).forEach((w) => S.removeWish(c.id, w.id));
     d = null;
     toast(`${sales.length} ventas guardadas`);
@@ -292,11 +312,9 @@ function save() {
     return sales;
   }
 
-  let productId = d.productId;
-  if (d.newProduct) productId = S.saveProduct({ type: d.newProduct.type, brand: d.newProduct.brand.trim(), model: d.newProduct.model.trim(), price, sku: d.newProduct.sku || '', photos: [], image: d.newProduct.image || '', stockxSlug: d.newProduct.stockxSlug || '' });
   const paid = d.pay === 'full' ? price : d.pay === 'deposit' ? toNum(d.deposit) : 0;
   const s = S.createSale({
-    productId, unitId: d.unitId, size: String(d.size).trim().toUpperCase(), clientId: d.clientId, channel: d.channel,
+    productId, unitId: d.unitId, size: typed.length === 1 ? typed[0] : String(d.size).trim().toUpperCase(), clientId: d.clientId, channel: d.channel,
     price, cost: toNum(d.cost), fees: toNum(d.fees), shippingCost: toNum(d.shippingCost),
     payments: paid ? [{ amount: paid, method: d.method, date: d.date }] : [], method: d.method,
     delivery: d.delivery, reservedUntil: d.reservedUntil, date: d.date || today(), notes: d.notes.trim(),
@@ -330,6 +348,16 @@ function multiReceipt(sales) {
 }
 
 function pickSize(size, delta) {
+  if (!stockMode()) {
+    // No stock: the sizes live in the typed text ("42, 43x2"); the grid just rewrites it.
+    const counts = typedSizes().reduce((o, s) => { o[s] = (o[s] || 0) + 1; return o; }, {});
+    const n = Math.max(0, Math.min(99, (counts[size] || 0) + delta));
+    if (n) counts[size] = n; else delete counts[size];
+    d.size = compactSizes(counts);
+    d.error = '';
+    rerender();
+    return;
+  }
   const have = S.availableUnits(d.productId).filter((u) => u.size === size).length;
   const n = Math.max(0, Math.min(have, (d.picks[size] || 0) + delta));
   if (n) d.picks[size] = n; else delete d.picks[size];
@@ -361,6 +389,11 @@ registerActions({
     d[el.dataset.k] = el.value;
     if (el.dataset.k === 'price') recalcFees();
     if (el.dataset.k === 'price' && document.getElementById('sell-fees')) document.getElementById('sell-fees').value = d.fees;
+    if (el.dataset.k === 'size') {
+      const n = pickedCount();
+      const btn = document.querySelector('.sell-foot button[type=submit]');
+      if (btn) btn.textContent = n > 1 ? `Guardar ${n} ventas` : 'Guardar venta';
+    }
     refreshSummary();
   },
   'sell-fees': (el) => { d.fees = el.value; d.feesTouched = true; refreshSummary(); },
