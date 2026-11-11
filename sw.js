@@ -1,10 +1,10 @@
 // Offline support: app files are served from the network when possible (so updates arrive)
 // and from the cache when there is no connection. Data lives in IndexedDB, not here.
-const CACHE = 'solebook-v3';
+const CACHE = 'solebook-v4';
 const SHELL = [
   './', './index.html', './css/app.css', './manifest.webmanifest',
   './js/main.js', './js/util.js', './js/store.js', './js/sample.js', './js/sync.js', './js/ui.js', './js/sheets.js',
-  './js/io.js', './js/share.js', './js/scanner.js', './js/importer.js', './js/salestable.js',
+  './js/io.js', './js/share.js', './js/scanner.js', './js/importer.js', './js/salestable.js', './js/catalog.js',
   './js/views/panel.js', './js/views/ventas.js', './js/views/vender.js', './js/views/clientes.js',
   './js/views/stock.js', './js/views/informes.js', './js/views/ajustes.js', './js/views/mas.js',
   './icons/icon.svg', './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png',

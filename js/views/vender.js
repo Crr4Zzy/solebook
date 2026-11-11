@@ -4,6 +4,20 @@ import * as S from '../store.js';
 import { registerActions, productThumb, avatar, pill, goThen, rerender, toast, marginText } from '../ui.js';
 import { openClientForm, openSale, receiptText } from '../sheets.js';
 import { startScanner, stopScanner, scannerSupported } from '../scanner.js';
+import { registerPicker, pickerHTML, searchPicker, resetPicker, catalogSizes } from '../catalog.js';
+
+function pickFromCatalog(it) {
+  const existing = it.sku && S.state.products.find((x) => (x.sku || '').toUpperCase() === it.sku);
+  if (existing) { chooseProduct(existing.id); rerender(); return; }
+  let model = it.model || it.title;
+  if (it.brand && model.toLowerCase().startsWith(it.brand.toLowerCase())) model = model.slice(it.brand.length).trim();
+  d.productId = null; d.unitId = null; d.size = ''; d.cost = '';
+  d.newProduct = { type: it.type, brand: it.brand, model, sku: it.sku, image: it.image, stockxSlug: it.slug };
+  d.step = 2; d.catSizes = null;
+  rerender();
+  window.scrollTo(0, 0);
+  catalogSizes(it.slug).then((sizes) => { if (d?.newProduct?.stockxSlug === it.slug) { d.catSizes = sizes; rerender(); } }).catch(() => {});
+}
 
 let d = null;
 
@@ -49,7 +63,8 @@ function recalcFees() {
 export const title = () => 'Nueva venta';
 
 export function render({ query, fresh: isFresh }) {
-  if (isFresh || !d) fresh(query);
+  if (isFresh || !d) { fresh(query); resetPicker('sell'); }
+  registerPicker('sell', { onPick: pickFromCatalog, refresh: rerender });
   return `<div class="sell-wrap">${d.step === 1 ? step1() : step2()}</div>`;
 }
 
@@ -102,6 +117,7 @@ function step1() {
       <h3 class="mb">${q ? 'En tu stock' : 'Tu stock'}</h3>
       <div class="list">${inStock.map(row).join('') || `<p class="muted small" style="padding:8px 0">${q ? 'No tienes nada en stock con ese nombre.' : 'Todavía no tienes stock. Puedes registrar la venta igualmente.'}</p>`}</div>
       ${noStock.length ? `<h3 class="mt-lg mb">Sin stock</h3><div class="list">${noStock.map(row).join('')}</div>` : ''}
+    ${q ? pickerHTML('sell', { withInput: false, title: 'En StockX (venta sin stock)' }) : ''}
     </div>
     <div class="card mt">
       <div class="row" style="border:none;padding:0">
@@ -126,8 +142,8 @@ function step2() {
     sizeBlock = `<div class="choices">${stock.sizes.map((s) => `<button type="button" class="choice ${d.size === s.size ? 'on' : ''}" data-act="sell-size" data-v="${esc(s.size)}">${esc(s.size)}<small>${s.n} ${isClothes ? (s.n === 1 ? 'ud' : 'uds') : s.n === 1 ? 'par' : 'pares'}</small></button>`).join('')}</div>
       <p class="hint tiny muted mt">Solo aparecen las tallas que tienes.${d.unitId ? ` Coste de esta unidad: ${money(S.unit(d.unitId)?.cost)}.` : ''}</p>`;
   } else {
-    sizeBlock = `<input class="input" id="sell-size" data-input="sell-field" data-k="size" value="${esc(d.size)}" placeholder="${isClothes ? 'M' : '43'}" autocomplete="off">
-      <p class="tiny muted mt">No hay stock de este producto: escribe la talla y el coste a mano.</p>`;
+    sizeBlock = `${d.catSizes?.length ? `<div class="size-pick mb">${d.catSizes.map((sz) => `<button type="button" class="size-chip ${d.size === sz ? 'on' : ''}" data-act="sell-catsize" data-v="${esc(sz)}">${esc(sz)}</button>`).join('')}</div>` : ''}<input class="input" id="sell-size" data-input="sell-field" data-k="size" value="${esc(d.size)}" placeholder="${isClothes ? 'M' : '43'}" autocomplete="off">
+      <p class="tiny muted mt">${d.catSizes?.length ? 'No lo tienes en stock: toca la talla (o escríbela) y pon abajo lo que te costó.' : 'No hay stock de este producto: escribe la talla y el coste a mano.'}</p>`;
   }
 
   // client picker
@@ -154,8 +170,8 @@ function step2() {
   return `${head(2)}
     <form data-submit="sell-save" novalidate>
     <div class="card">
-      <div class="row" style="border:none;padding:0 0 4px">${productThumb(p || { type: np?.type })}
-        <div class="grow"><div class="title">${p ? esc(S.productName(p)) : 'Producto nuevo'}</div><div class="meta">${p ? esc(p.sku || (p.type === 'ropa' ? 'Ropa' : 'Zapatillas')) : 'Se añadirá a tu catálogo'}</div></div>
+      <div class="row" style="border:none;padding:0 0 4px">${productThumb(p || { type: np?.type, image: np?.image })}
+        <div class="grow"><div class="title">${p ? esc(S.productName(p)) : np?.image ? esc(`${np.brand} ${np.model}`) : 'Producto nuevo'}</div><div class="meta">${p ? esc(p.sku || (p.type === 'ropa' ? 'Ropa' : 'Zapatillas')) : np?.image ? `De StockX · ${esc(np.sku)} · se añadirá a tu catálogo` : 'Se añadirá a tu catálogo'}</div></div>
         <button type="button" class="btn sm" data-act="sell-back">Cambiar</button></div>
       ${np ? `<div class="chips mt">${['zapatilla', 'ropa'].map((t) => `<button type="button" class="chip ${np.type === t ? 'on' : ''}" data-act="sell-np-type" data-v="${t}">${t === 'ropa' ? 'Ropa' : 'Zapatillas'}</button>`).join('')}</div>
         <div class="two mt"><div class="field" style="margin:0"><label for="np-brand">Marca</label><input class="input" id="np-brand" data-input="sell-np" data-k="brand" value="${esc(np.brand)}" placeholder="Nike"></div>
@@ -232,7 +248,7 @@ function save() {
   if (d.error) { rerender(); return null; }
 
   let productId = d.productId;
-  if (d.newProduct) productId = S.saveProduct({ type: d.newProduct.type, brand: d.newProduct.brand.trim(), model: d.newProduct.model.trim(), price, sku: '', photos: [] });
+  if (d.newProduct) productId = S.saveProduct({ type: d.newProduct.type, brand: d.newProduct.brand.trim(), model: d.newProduct.model.trim(), price, sku: d.newProduct.sku || '', photos: [], image: d.newProduct.image || '', stockxSlug: d.newProduct.stockxSlug || '' });
   const paid = d.pay === 'full' ? price : d.pay === 'deposit' ? toNum(d.deposit) : 0;
   const s = S.createSale({
     productId, unitId: d.unitId, size: String(d.size).trim().toUpperCase(), clientId: d.clientId, channel: d.channel,
@@ -251,7 +267,7 @@ function save() {
 }
 
 registerActions({
-  'sell-q': (el) => { d.q = el.value; rerender(); },
+  'sell-q': (el) => { d.q = el.value; searchPicker('sell', el.value); rerender(); },
   'sell-scan': () => { d.scanning = true; rerender(); },
   'sell-scan-stop': () => { d.scanning = false; stopScanner(); rerender(); },
   'sell-product': (el) => { stopScanner(); d.scanning = false; chooseProduct(el.dataset.id); rerender(); window.scrollTo(0, 0); },
@@ -266,6 +282,7 @@ registerActions({
   'sell-np-type': (el) => { d.newProduct.type = el.dataset.v; rerender(); },
   'sell-np': (el) => { d.newProduct[el.dataset.k] = el.value; },
   'sell-back': () => { d.step = 1; d.error = ''; rerender(); },
+  'sell-catsize': (el) => { d.size = el.dataset.v; d.error = ''; rerender(); },
   'sell-size': (el) => { chooseSize(el.dataset.v); d.error = ''; rerender(); },
   'sell-field': (el) => {
     d[el.dataset.k] = el.value;

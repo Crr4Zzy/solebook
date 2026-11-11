@@ -3,6 +3,25 @@ import * as S from '../store.js';
 import { registerActions, rerender, toast } from '../ui.js';
 import { SETUP_SQL, connect, disconnect, syncNow, getConfig, getStatus } from '../sync.js';
 import { downloadBackup, readBackup, exportSalesCSV } from '../io.js';
+import { catalogKey, setCatalogKey, searchCatalog, catalogThumb } from '../catalog.js';
+
+let catTest = { busy: false, msg: '', ok: false, sample: [] };
+
+function catalogCard() {
+  const k = catalogKey();
+  return `<p class="small mb">Al añadir una zapatilla te sugiere el modelo de StockX con su <b>foto</b>, el SKU y <b>todas sus tallas</b>. Usa el catálogo de StockX a través de <a href="https://kicks.dev" target="_blank" rel="noopener">KicksDB</a>, que tiene un plan <b>gratis</b> de 1.000 búsquedas al mes.</p>
+    ${k ? `<div class="row" style="border:none;padding-top:0"><span class="dot ok"></span><div class="grow"><div class="title">Conectado</div><div class="meta">Clave ${esc(k.slice(0, 10))}…</div></div></div>`
+      : `<ol class="small" style="padding-left:18px;margin:0 0 12px;line-height:1.7">
+        <li>Crea una cuenta gratis en <a href="https://kicks.dev" target="_blank" rel="noopener">kicks.dev</a>.</li>
+        <li>En <a href="https://kicks.dev/api-keys" target="_blank" rel="noopener">API keys</a> copia tu clave (empieza por <code>KICKS-</code>).</li>
+        <li>Pégala aquí y pulsa «Guardar y probar».</li></ol>`}
+    <form data-submit="cat-key">
+      <div class="field"><label for="cat-key">Clave de KicksDB</label><input class="input" id="cat-key" name="key" value="${esc(k || '')}" placeholder="KICKS-XXXX-XXXX-XXXX-XXXXXXXXXXXX" autocomplete="off" autocapitalize="characters" spellcheck="false"><span class="hint">Se guarda solo en este dispositivo. En el otro dispositivo pégala también.</span></div>
+      ${catTest.msg ? `<p class="small mb ${catTest.ok ? 'ok-text' : 'danger-text'}">${esc(catTest.msg)}</p>` : ''}
+      ${catTest.sample.length ? `<div class="list mb">${catTest.sample.map((it) => `<div class="row">${catalogThumb(it.image)}<div class="grow"><div class="title">${esc(it.title)}</div><div class="meta">${esc(it.sku)}</div></div></div>`).join('')}</div>` : ''}
+      <div class="btn-row"><button class="btn primary" type="submit" ${catTest.busy ? 'disabled' : ''}>${catTest.busy ? 'Probando…' : 'Guardar y probar'}</button>${k ? '<button class="btn danger" type="button" data-act="cat-key-off">Quitar</button>' : ''}</div>
+    </form>`;
+}
 
 let syncForm = { url: '', key: '', email: '', busy: false, error: '', info: '' };
 
@@ -109,6 +128,11 @@ export function render({ query }) {
           ${syncCard()}
         </div>
 
+        <div class="card" id="catalogo-card" ${query.s === 'catalogo' ? 'style="border-color:var(--accent)"' : ''}>
+          <div class="card-head"><h2>${icon('star')} Catálogo StockX</h2></div>
+          ${catalogCard()}
+        </div>
+
         <div class="card">
           <div class="card-head"><h2>Instalar como app</h2></div>
           ${installHelp()}
@@ -139,6 +163,7 @@ export function render({ query }) {
 
 export function mount(root, { query }) {
   if (query.s === 'sync') document.getElementById('sync-card')?.scrollIntoView({ block: 'start' });
+  if (query.s === 'catalogo') document.getElementById('catalogo-card')?.scrollIntoView({ block: 'start' });
 }
 
 const form = (el) => Object.fromEntries(new FormData(el).entries());
@@ -214,6 +239,26 @@ registerActions({
     p.prompt();
     await p.userChoice.catch(() => {});
     window.__installPrompt = null;
+    rerender();
+  },
+  'cat-key': async (el) => {
+    const k = el.key.value.trim();
+    if (!/^KICKS-/i.test(k)) { catTest = { busy: false, ok: false, msg: 'La clave debe empezar por KICKS-', sample: [] }; rerender(); return; }
+    catTest = { busy: true, ok: false, msg: '', sample: [] };
+    rerender();
+    await setCatalogKey(k);
+    try {
+      const items = await searchCatalog('jordan 4 bred');
+      catTest = { busy: false, ok: true, msg: `Funciona: ${items.length} resultados para «jordan 4 bred».`, sample: items.slice(0, 3) };
+    } catch (e) {
+      if (/no es válida/.test(e.message)) await setCatalogKey(''); // don't keep a wrong key
+      catTest = { busy: false, ok: false, msg: e.message, sample: [] };
+    }
+    rerender();
+  },
+  'cat-key-off': async () => {
+    await setCatalogKey('');
+    catTest = { busy: false, ok: false, msg: '', sample: [] };
     rerender();
   },
   backup: () => downloadBackup(),

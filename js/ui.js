@@ -106,8 +106,8 @@ export function withUndo(message, fn) {
 
 // ---------- fragments ----------
 export const productThumb = (p, cls = '') => {
-  const ph = p?.photos?.[0];
-  return `<div class="thumb ${cls}">${ph ? `<img src="${ph}" alt="">` : icon(p?.type === 'ropa' ? 'shirt' : 'shoe')}</div>`;
+  const ph = p?.photos?.[0] || p?.image;
+  return `<div class="thumb ${cls} ${!p?.photos?.[0] && p?.image ? 'cat-thumb' : ''}">${ph ? `<img src="${esc(ph)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : icon(p?.type === 'ropa' ? 'shirt' : 'shoe')}</div>`;
 };
 export const avatar = (c, cls = '') => `<div class="avatar ${cls}">${esc(initials(c?.name))}</div>`;
 export const pill = (label, cls = '') => `<span class="pill ${cls}">${esc(label)}</span>`;

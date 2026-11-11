@@ -4,7 +4,7 @@ import * as S from './store.js';
 import { toast } from './ui.js';
 import { download } from './io.js';
 
-const loadImg = (src) => new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; });
+const loadImg = (src) => new Promise((res, rej) => { const i = new Image(); if (!src.startsWith('data:')) i.crossOrigin = 'anonymous'; i.onload = () => res(i); i.onerror = rej; i.src = src; });
 
 function roundRect(ctx, x, y, w, h, r) {
   ctx.beginPath();
@@ -47,10 +47,12 @@ export async function makeCard(productId) {
   ctx.clip();
   ctx.fillStyle = '#FFFFFF';
   ctx.fillRect(px, py, pw, ph);
-  if (p.photos?.[0]) {
+  const photo = p.photos?.[0] || p.image;
+  if (photo) {
     try {
-      const img = await loadImg(p.photos[0]);
-      const scale = Math.max(pw / img.width, ph / img.height);
+      const img = await loadImg(photo);
+      const fit = p.photos?.[0] ? Math.max : Math.min; // own photo fills, StockX image fits whole
+      const scale = fit(pw / img.width, ph / img.height) * (p.photos?.[0] ? 1 : 0.9);
       const w = img.width * scale, h = img.height * scale;
       ctx.drawImage(img, px + (pw - w) / 2, py + (ph - h) / 2, w, h);
     } catch {}

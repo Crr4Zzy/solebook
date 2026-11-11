@@ -3,6 +3,7 @@ import * as S from '../store.js';
 import { registerActions, productThumb, avatar, pill, empty, kpi, saleRow, rerender, openSheet, refreshSheet, closeSheet, sheetHead, toast, withUndo, go, goThen } from '../ui.js';
 import { shareProductCard } from '../share.js';
 import { salesTable, tableToolbar, filterSales } from '../salestable.js';
+import { registerPicker, pickerHTML, searchPicker, resetPicker, catalogSizes, catalogEnabled } from '../catalog.js';
 
 const f = { q: '', filter: '' };
 let lastQueryF = null;
@@ -74,6 +75,11 @@ export const detail = {
   render({ id }) {
     const p = S.product(id);
     if (!p) throw new Error('not found');
+    if (!p.image && catalogEnabled()) {
+      const pk = registerPicker(`product:${id}`, { onPick: (it) => { S.saveProduct({ id, image: it.image, stockxSlug: it.slug, sku: p.sku || it.sku }); toast('Foto de StockX añadida'); }, refresh: rerender });
+      if (!pk.q) pk.q = S.productName(p);
+      if (!pk.items.length && !pk.loading && !pk.error && pk.q.trim().length >= 3) searchPicker(`product:${id}`, pk.q);
+    }
     const st = S.productStock(p);
     const sold = S.state.sales.filter((s) => s.productId === id).sort((a, b) => b.date.localeCompare(a.date));
     const avgNet = sold.length ? sold.reduce((a, s) => a + S.saleNet(s), 0) / sold.length : 0;
@@ -94,7 +100,10 @@ export const detail = {
           <div class="photo-strip mb">
             ${p.photos.map((ph, i) => `<div class="ph"><img src="${ph}" alt=""><button class="del" data-act="photo-del" data-id="${id}" data-i="${i}" aria-label="Quitar foto">${icon('x', 'sm')}</button></div>`).join('')}
             ${p.photos.length < 6 ? `<label class="ph">${icon('camera')}<input type="file" accept="image/*" hidden data-change="photo-add" data-id="${id}"></label>` : ''}
-          </div>` : `<label class="hero-photo empty-photo">${icon(p.type === 'ropa' ? 'shirt' : 'shoe')}<span>${icon('camera', 'sm')} Añadir foto</span><input type="file" accept="image/*" hidden data-change="photo-add" data-id="${id}"></label>`}
+          </div>` : p.image ? `<div class="hero-photo cat-hero"><img src="${esc(p.image)}" alt="" referrerpolicy="no-referrer"></div>
+          <div class="btn-row mb"><label class="btn sm">${icon('camera', 'sm')} Añadir foto propia<input type="file" accept="image/*" hidden data-change="photo-add" data-id="${id}"></label></div>`
+          : `<label class="hero-photo empty-photo">${icon(p.type === 'ropa' ? 'shirt' : 'shoe')}<span>${icon('camera', 'sm')} Añadir foto</span><input type="file" accept="image/*" hidden data-change="photo-add" data-id="${id}"></label>
+          ${catalogEnabled() ? `<div class="card mb"><h3 class="mb">Buscar foto y tallas en StockX</h3>${pickerHTML(`product:${id}`, { title: 'Elige el modelo correcto' })}</div>` : ''}`}
           <div class="btn-row mb">
             <a class="btn primary" href="#/vender?producto=${id}">${icon('plus')} Vender</a>
             <button class="btn" data-act="stock-add" data-id="${id}">${icon('box')} Añadir stock</button>
@@ -152,8 +161,37 @@ export function openAddStock(productId = null) {
     productId, mode: productId ? 'existing' : S.state.products.length ? 'search' : 'new', q: '',
     np: { type: 'zapatilla', brand: '', model: '', sku: '', price: '', market: '', barcode: '' },
     sizes: '', costMode: 'unit', cost: '', date: today(), note: '', error: '',
+    catSizes: null, catLoading: false, catError: '',
   };
+  resetPicker('stock-add');
+  registerPicker('stock-add', { onPick: pickFromCatalog, refresh: () => refreshSheet(true) });
   openSheet(addStockSheet);
+  const p = productId && S.product(productId);
+  if (p?.stockxSlug) loadCatSizes(p.stockxSlug);
+}
+
+// Sizes of the chosen StockX model, to tap instead of typing.
+async function loadCatSizes(slug) {
+  as.catLoading = true; as.catError = ''; as.catSizes = null;
+  refreshSheet(true);
+  try { as.catSizes = await catalogSizes(slug); } catch (e) { as.catError = e.message; }
+  as.catLoading = false;
+  refreshSheet(true);
+}
+
+function pickFromCatalog(it) {
+  // Already in your catalogue (same SKU)? use it.
+  const existing = it.sku && S.state.products.find((x) => (x.sku || '').toUpperCase() === it.sku);
+  if (existing) {
+    as.productId = existing.id; as.mode = 'existing';
+    if (!existing.image && it.image) S.saveProduct({ id: existing.id, image: it.image, stockxSlug: it.slug });
+  } else {
+    let model = it.model || it.title;
+    if (it.brand && model.toLowerCase().startsWith(it.brand.toLowerCase())) model = model.slice(it.brand.length).trim();
+    as.productId = null; as.mode = 'new';
+    as.np = { ...as.np, type: it.type, brand: it.brand, model, sku: it.sku, image: it.image, stockxSlug: it.slug, stockxTitle: it.title };
+  }
+  loadCatSizes(it.slug);
 }
 
 function addStockSheet() {
@@ -168,10 +206,13 @@ function addStockSheet() {
     const res = S.state.products.filter((x) => !as.q || matches(`${x.brand} ${x.model} ${x.sku || ''}`, as.q)).slice(0, 8);
     productBlock = `<div class="input-wrap">${icon('search')}<input class="input" id="as-q" data-input="as-q" placeholder="Busca un modelo que ya tengas" value="${esc(as.q)}" autocomplete="off" autofocus></div>
       <div class="search-results">${res.map((x) => `<div class="row click" data-act="as-pick" data-id="${x.id}">${productThumb(x, 'sm')}<div class="grow"><div class="title">${esc(S.productName(x))}</div><div class="meta">${esc(x.sku || '')}</div></div></div>`).join('')}
-        <div class="row click" data-act="as-new"><div class="thumb sm">${icon('plus')}</div><div class="grow"><div class="title">${as.q ? `Producto nuevo «${esc(as.q)}»` : 'Producto nuevo'}</div></div></div></div>`;
+        <div class="row click" data-act="as-new"><div class="thumb sm">${icon('plus')}</div><div class="grow"><div class="title">${as.q ? `Producto nuevo «${esc(as.q)}»` : 'Producto nuevo'}</div><div class="meta">Escribiéndolo tú a mano</div></div></div></div>
+      ${pickerHTML('stock-add', { withInput: false })}`;
   } else {
     const np = as.np;
-    productBlock = `<div class="chips mb">${['zapatilla', 'ropa'].map((t) => `<button type="button" class="chip ${np.type === t ? 'on' : ''}" data-act="as-type" data-v="${t}">${t === 'ropa' ? 'Ropa' : 'Zapatillas'}</button>`).join('')}
+    productBlock = `${np.image ? `<div class="cat-chosen mb">${productThumb({ image: np.image, type: np.type })}<div class="grow"><div class="title">${esc(np.stockxTitle || `${np.brand} ${np.model}`)}</div><div class="meta">De StockX${np.sku ? ` · ${esc(np.sku)}` : ''}</div></div><button type="button" class="btn sm" data-act="as-search">Cambiar</button></div>`
+      : `<div class="mb">${pickerHTML('stock-add', { placeholder: 'Busca en StockX para rellenarlo solo…' })}</div>`}
+      <div class="chips mb">${['zapatilla', 'ropa'].map((t) => `<button type="button" class="chip ${np.type === t ? 'on' : ''}" data-act="as-type" data-v="${t}">${t === 'ropa' ? 'Ropa' : 'Zapatillas'}</button>`).join('')}
       ${S.state.products.length ? '<button type="button" class="chip" data-act="as-search">Buscar existente</button>' : ''}</div>
       <div class="two"><div class="field"><label for="np-b">Marca</label><input class="input" id="np-b" data-input="as-np" data-k="brand" value="${esc(np.brand)}" placeholder="${np.type === 'ropa' ? 'Essentials' : 'Jordan'}" autofocus></div>
       <div class="field"><label for="np-m">Modelo</label><input class="input" id="np-m" data-input="as-np" data-k="model" value="${esc(np.model)}" placeholder="${np.type === 'ropa' ? 'Sudadera negra' : '4 Retro Bred'}"></div></div>
@@ -187,7 +228,11 @@ function addStockSheet() {
       <div class="field"><span class="label-t">Producto</span>${productBlock}</div>
       <div class="field"><label for="as-sizes">Tallas</label>
         <input class="input" id="as-sizes" data-input="as-sizes" value="${esc(as.sizes)}" placeholder="${isClothes ? 'S, M, Lx2, XL' : '41, 42, 43x2'}" autocomplete="off">
-        <span class="hint" id="as-preview">${sizesPreview(sizes)}</span></div>
+        <span class="hint" id="as-preview">${sizesPreview(sizes)}</span>
+        ${as.catLoading ? '<p class="tiny muted mt">Cargando tallas de StockX…</p>' : ''}${as.catError ? `<p class="tiny danger-text mt">${esc(as.catError)}</p>` : ''}
+        ${as.catSizes?.length ? `<div class="label-t mt">Tallas de este modelo · toca las que tienes</div>
+          <div class="size-pick">${as.catSizes.map((sz) => { const n = sizes.filter((x) => x === sz).length; return `<button type="button" class="size-chip ${n ? 'on' : ''}" data-act="as-size" data-v="${esc(sz)}">${esc(sz)}${n > 1 ? `<b>×${n}</b>` : ''}</button>`; }).join('')}</div>
+          <div class="tiny muted mt">Toca otra vez para sumar otra unidad. ${sizes.length ? '<a href="#" data-act="as-size-clear">Borrar tallas</a>' : ''}</div>` : ''}</div>
       <div class="field"><span class="label-t">Coste</span>
         <div class="chips mb">${[['unit', 'Por unidad'], ['lot', 'Total del lote']].map(([k, l]) => `<button type="button" class="chip ${as.costMode === k ? 'on' : ''}" data-act="as-costmode" data-v="${k}">${l}</button>`).join('')}</div>
         <div class="input-wrap"><input class="input" id="as-cost" inputmode="decimal" data-input="as-cost" value="${esc(as.cost)}" placeholder="0"><span class="suffix">€</span></div>
@@ -211,7 +256,7 @@ function saveStock() {
   if (as.error) { refreshSheet(true); return; }
   if (!productId) {
     const np = as.np;
-    productId = S.saveProduct({ type: np.type, brand: np.brand.trim(), model: np.model.trim(), sku: np.sku.trim().toUpperCase(), price: toNum(np.price), market: toNum(np.market) || null, barcode: '', photos: [], notes: '' });
+    productId = S.saveProduct({ type: np.type, brand: np.brand.trim(), model: np.model.trim(), sku: np.sku.trim().toUpperCase(), price: toNum(np.price), market: toNum(np.market) || null, barcode: '', photos: [], notes: '', image: np.image || '', stockxSlug: np.stockxSlug || '' });
   }
   const perUnit = as.costMode === 'lot' ? toNum(as.cost) / sizes.length : toNum(as.cost);
   S.addUnits(productId, sizes, Math.round(perUnit * 100) / 100, as.date || today(), as.note.trim());
@@ -258,15 +303,20 @@ registerActions({
     rerender();
   },
   'stock-add': (el) => openAddStock(el.dataset.id || null),
-  'as-q': (el) => { as.q = el.value; refreshSheet(true); },
-  'as-pick': (el) => { as.productId = el.dataset.id; as.mode = 'existing'; refreshSheet(true); setTimeout(() => document.getElementById('as-sizes')?.focus(), 0); },
+  'as-q': (el) => { as.q = el.value; searchPicker('stock-add', el.value); refreshSheet(true); },
+  'as-pick': (el) => { as.productId = el.dataset.id; as.mode = 'existing'; const sl = S.product(el.dataset.id)?.stockxSlug; if (sl) loadCatSizes(sl); refreshSheet(true); setTimeout(() => document.getElementById('as-sizes')?.focus(), 0); },
   'as-new': () => {
     const [b, ...rest] = as.q.trim().split(/\s+/);
     if (as.q.trim()) { as.np.brand = b; as.np.model = rest.join(' '); }
     as.mode = 'new'; refreshSheet(true);
   },
-  'as-search': () => { as.mode = 'search'; refreshSheet(true); },
-  'as-change': () => { as.productId = null; as.mode = 'search'; refreshSheet(true); },
+  'as-search': () => { as.mode = 'search'; as.np.image = ''; as.np.stockxSlug = ''; as.catSizes = null; refreshSheet(true); },
+  'as-size': (el) => {
+    as.sizes = [as.sizes.trim(), el.dataset.v].filter(Boolean).join(', ');
+    refreshSheet(true);
+  },
+  'as-size-clear': () => { as.sizes = ''; refreshSheet(true); },
+  'as-change': () => { as.productId = null; as.mode = 'search'; as.catSizes = null; refreshSheet(true); },
   'as-type': (el) => { as.np.type = el.dataset.v; refreshSheet(true); },
   'as-np': (el) => { as.np[el.dataset.k] = el.value; },
   'as-f': (el) => { as[el.dataset.k] = el.value; },

@@ -3,6 +3,7 @@ import * as S from './store.js';
 import { actions, closeSheet, sheetOpen, refreshSheet, go } from './ui.js';
 import { initSync, onStatus, getStatus } from './sync.js';
 import { stopScanner } from './scanner.js';
+import { loadCatalogKey } from './catalog.js';
 import './sheets.js';
 import * as panel from './views/panel.js';
 import * as ventas from './views/ventas.js';
@@ -145,6 +146,7 @@ window.addEventListener('hashchange', () => {
 // ---------- start ----------
 async function start() {
   await S.load();
+  await loadCatalogKey().catch(() => {});
   applyTheme();
   S.subscribe(() => {
     applyTheme();
