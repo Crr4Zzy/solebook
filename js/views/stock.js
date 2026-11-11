@@ -3,7 +3,7 @@ import * as S from '../store.js';
 import { registerActions, productThumb, avatar, pill, empty, kpi, saleRow, rerender, openSheet, refreshSheet, closeSheet, sheetHead, toast, withUndo, go, goThen } from '../ui.js';
 import { shareProductCard } from '../share.js';
 import { salesTable, tableToolbar, filterSales } from '../salestable.js';
-import { registerPicker, pickerHTML, searchPicker, resetPicker, catalogSizes, catalogEnabled } from '../catalog.js';
+import { registerPicker, pickerHTML, searchPicker, resetPicker, catalogSizes, catalogEnabled, searchCatalog } from '../catalog.js';
 
 const f = { q: '', filter: '' };
 let lastQueryF = null;
@@ -84,7 +84,7 @@ export const detail = {
     if (!p) throw new Error('not found');
     if (!p.image && catalogEnabled()) {
       const pk = registerPicker(`product:${id}`, { onPick: (it) => { S.saveProduct({ id, image: it.image, stockxSlug: it.slug, sku: p.sku || it.sku }); toast('Foto de StockX añadida'); }, refresh: rerender });
-      if (!pk.q) pk.q = S.productName(p);
+      if (!pk.q) pk.q = p.sku || S.productName(p);
       if (!pk.items.length && !pk.loading && !pk.error && pk.q.trim().length >= 3) searchPicker(`product:${id}`, pk.q);
     }
     const st = S.productStock(p);
@@ -224,7 +224,7 @@ function addStockSheet() {
       ${S.state.products.length ? '<button type="button" class="chip" data-act="as-search">Buscar existente</button>' : ''}</div>
       <div class="two"><div class="field"><label for="np-b">Marca</label><input class="input" id="np-b" data-input="as-np" data-k="brand" value="${esc(np.brand)}" placeholder="${np.type === 'ropa' ? 'Essentials' : 'Jordan'}" autofocus></div>
       <div class="field"><label for="np-m">Modelo</label><input class="input" id="np-m" data-input="as-np" data-k="model" value="${esc(np.model)}" placeholder="${np.type === 'ropa' ? 'Sudadera negra' : '4 Retro Bred'}"></div></div>
-      <div class="field"><label for="np-s">SKU (opcional)</label><input class="input" id="np-s" data-input="as-np" data-k="sku" value="${esc(np.sku)}" placeholder="FV5029-006" autocapitalize="characters"></div>
+      <div class="field"><label for="np-s">SKU (opcional)</label><input class="input" id="np-s" data-input="as-np" data-k="sku" value="${esc(np.sku)}" placeholder="FV5029-006" autocapitalize="characters"><span class="hint" id="np-s-hint">${skuHint()}</span></div>
       ${S.state.settings.showMarket ? `<div class="field"><label for="np-mk">Precio de mercado (opcional)</label><div class="input-wrap"><input class="input" id="np-mk" inputmode="decimal" data-input="as-np" data-k="market" value="${esc(np.market)}" placeholder="Lo que se paga en StockX, Vinted…"><span class="suffix">€</span></div><span class="hint">Solo como referencia para no vender barato.</span></div>` : ''}`;
   }
 
@@ -276,6 +276,48 @@ function bumpSize(size, delta) {
 }
 const sizesPreview = (sizes) => (sizes.length ? `${sizes.length} ${sizes.length === 1 ? 'unidad' : 'unidades'}: ${[...new Set(sizes)].sort(sizeSort).map((s) => { const n = sizes.filter((x) => x === s).length; return n > 1 ? `${s} ×${n}` : s; }).join(' · ')}` : 'Separa con comas. Usa «x2» si tienes varias de la misma talla.');
 const costHint = (sizes, perUnit) => (as.costMode === 'lot' ? (sizes.length && toNum(as.cost) ? `= ${money(perUnit, true)} por unidad` : 'Se reparte entre todas las unidades.') : sizes.length > 1 && toNum(as.cost) ? `Total: ${money(toNum(as.cost) * sizes.length)}` : '');
+
+// Typing a SKU looks the model up in the StockX catalogue and fills in the photo (and sizes, brand, model if empty).
+const normSku = (s) => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+const skuHint = () => {
+  if (!catalogEnabled()) return 'Para que busque la foto sola, conecta el catálogo en <a href="#/ajustes?s=catalogo">Ajustes</a>.';
+  if (as.skuState === 'searching') return 'Buscando la foto…';
+  if (as.skuState === 'found') return `Foto encontrada: ${esc(as.np.stockxTitle || '')}`;
+  if (as.skuState === 'notfound') return 'No he encontrado ese SKU en StockX. Puedes buscarlo por nombre arriba.';
+  if (as.skuState === 'error') return esc(as.skuError || '');
+  return 'Al escribir el SKU se busca la foto sola.';
+};
+let skuTimer;
+function lookupSku() {
+  clearTimeout(skuTimer);
+  const sku = as.np.sku.trim();
+  // The SKU changed after a photo was found for the old one: drop that photo and look again.
+  if (as.np.autoSku && normSku(as.np.autoSku) !== normSku(sku)) {
+    as.np = { ...as.np, image: '', stockxSlug: '', stockxTitle: '', autoSku: '' };
+    as.catSizes = null; as.skuState = '';
+    refreshSheet(true);
+  }
+  if (!catalogEnabled() || normSku(sku).length < 5 || as.np.image) { as.skuState = as.np.image ? as.skuState : ''; return; }
+  as.skuState = 'searching';
+  const h = document.getElementById('np-s-hint'); if (h) h.innerHTML = skuHint();
+  skuTimer = setTimeout(async () => {
+    try {
+      const items = await searchCatalog(sku);
+      if (!as || as.np.sku.trim() !== sku || as.mode !== 'new') return; // typed something else meanwhile
+      const hit = items.find((it) => normSku(it.sku) === normSku(sku));
+      if (!hit) { as.skuState = 'notfound'; }
+      else {
+        let model = hit.model || hit.title;
+        if (hit.brand && model.toLowerCase().startsWith(hit.brand.toLowerCase())) model = model.slice(hit.brand.length).trim();
+        const np = as.np;
+        as.np = { ...np, type: hit.type, brand: np.brand.trim() ? np.brand : hit.brand, model: np.model.trim() ? np.model : model, image: hit.image, stockxSlug: hit.slug, stockxTitle: hit.title, autoSku: sku };
+        as.skuState = 'found';
+        loadCatSizes(hit.slug);
+      }
+    } catch (e) { as.skuState = 'error'; as.skuError = e.message; }
+    refreshSheet(true);
+  }, 600);
+}
 
 // "Podrás devolverlo hasta el 17 nov (quedan 14 días)", worked out from the purchase date.
 const retHint = () => {
@@ -365,7 +407,7 @@ registerActions({
   'as-size-clear': () => { as.sizes = ''; refreshSheet(true); },
   'as-change': () => { as.productId = null; as.mode = 'search'; as.catSizes = null; refreshSheet(true); },
   'as-type': (el) => { as.np.type = el.dataset.v; refreshSheet(true); },
-  'as-np': (el) => { as.np[el.dataset.k] = el.value; },
+  'as-np': (el) => { as.np[el.dataset.k] = el.value; if (el.dataset.k === 'sku') lookupSku(); },
   'as-f': (el) => {
     as[el.dataset.k] = el.value;
     if (el.dataset.k === 'date') { const h = document.getElementById('as-ret-hint'); if (h) h.textContent = retHint(); }
