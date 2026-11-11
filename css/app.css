@@ -417,3 +417,12 @@ details[open] > summary::after { content: "−"; }
 .size-chip:hover { border-color: var(--accent); }
 .size-chip.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
 .size-chip b { font-size: 11px; }
+.qty-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 8px; margin-top: 6px; }
+.qty-cell { border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); overflow: hidden; display: flex; flex-direction: column; }
+.qty-cell.on { border-color: var(--accent); }
+.qty-size { border: 0; background: transparent; color: inherit; font: inherit; font-size: 15px; font-weight: 600; min-height: 36px; cursor: pointer; }
+.qty-cell.on .qty-size { background: var(--accent); color: var(--on-accent); }
+.qty-ctl { display: flex; align-items: center; justify-content: space-between; border-top: 1px solid var(--border); }
+.qty-ctl b { font-size: 15px; min-width: 20px; text-align: center; }
+.qty-b { border: 0; background: transparent; color: inherit; font: inherit; font-size: 20px; line-height: 1; width: 36px; min-height: 40px; cursor: pointer; }
+.qty-b:disabled { opacity: .3; cursor: default; }

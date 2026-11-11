@@ -160,7 +160,7 @@ export function openAddStock(productId = null) {
   as = {
     productId, mode: productId ? 'existing' : S.state.products.length ? 'search' : 'new', q: '',
     np: { type: 'zapatilla', brand: '', model: '', sku: '', price: '', market: '', barcode: '' },
-    sizes: '', costMode: 'unit', cost: '', date: today(), note: '', error: '',
+    sizes: '', half: false, costMode: 'unit', cost: '', date: today(), note: '', error: '',
     catSizes: null, catLoading: false, catError: '',
   };
   resetPicker('stock-add');
@@ -226,13 +226,13 @@ function addStockSheet() {
   return `${sheetHead('Añadir stock')}
     <form data-submit="as-save" novalidate>
       <div class="field"><span class="label-t">Producto</span>${productBlock}</div>
-      <div class="field"><label for="as-sizes">Tallas</label>
+      <div class="field"><span class="label-t">Tallas y cantidades</span>
+        ${as.catLoading ? '<p class="tiny muted mb">Cargando tallas de StockX…</p>' : ''}${as.catError ? `<p class="tiny danger-text mb">${esc(as.catError)}</p>` : ''}
+        ${sizeGrid(sizes, isClothes)}
+        <div class="chips mt">${!isClothes && !as.catSizes?.length ? `<button type="button" class="chip ${as.half ? 'on' : ''}" data-act="as-half">Medias tallas (40,5…)</button>` : ''}${sizes.length ? '<button type="button" class="chip" data-act="as-size-clear">Borrar tallas</button>' : ''}</div>
+        <label class="tiny muted mt" for="as-sizes" style="display:block">Toca una talla o el + para sumar una unidad. ¿Falta alguna? Escríbela aquí:</label>
         <input class="input" id="as-sizes" data-input="as-sizes" value="${esc(as.sizes)}" placeholder="${isClothes ? 'S, M, Lx2, XL' : '41, 42, 43x2'}" autocomplete="off">
-        <span class="hint" id="as-preview">${sizesPreview(sizes)}</span>
-        ${as.catLoading ? '<p class="tiny muted mt">Cargando tallas de StockX…</p>' : ''}${as.catError ? `<p class="tiny danger-text mt">${esc(as.catError)}</p>` : ''}
-        ${as.catSizes?.length ? `<div class="label-t mt">Tallas de este modelo · toca las que tienes</div>
-          <div class="size-pick">${as.catSizes.map((sz) => { const n = sizes.filter((x) => x === sz).length; return `<button type="button" class="size-chip ${n ? 'on' : ''}" data-act="as-size" data-v="${esc(sz)}">${esc(sz)}${n > 1 ? `<b>×${n}</b>` : ''}</button>`; }).join('')}</div>
-          <div class="tiny muted mt">Toca otra vez para sumar otra unidad. ${sizes.length ? '<a href="#" data-act="as-size-clear">Borrar tallas</a>' : ''}</div>` : ''}</div>
+        <span class="hint" id="as-preview">${sizesPreview(sizes)}</span></div>
       <div class="field"><span class="label-t">Coste</span>
         <div class="chips mb">${[['unit', 'Por unidad'], ['lot', 'Total del lote']].map(([k, l]) => `<button type="button" class="chip ${as.costMode === k ? 'on' : ''}" data-act="as-costmode" data-v="${k}">${l}</button>`).join('')}</div>
         <div class="input-wrap"><input class="input" id="as-cost" inputmode="decimal" data-input="as-cost" value="${esc(as.cost)}" placeholder="0"><span class="suffix">€</span></div>
@@ -242,6 +242,28 @@ function addStockSheet() {
       ${as.error ? `<p class="error mb">${esc(as.error)}</p>` : ''}
       <div class="sheet-foot"><button class="btn primary lg block" type="submit">${sizes.length ? `Añadir ${sizes.length} ${sizes.length === 1 ? 'unidad' : 'unidades'}` : 'Añadir'}</button></div>
     </form>`;
+}
+// Quick size grid: each size has its own − / + so you add many sizes and quantities in a few taps.
+const SHOE_SIZES = Array.from({ length: 12 }, (_, i) => String(36 + i));
+const SHOE_SIZES_HALF = Array.from({ length: 23 }, (_, i) => String(36 + i / 2));
+const CLOTHES_SIZES = ['XS', 'S', 'M', 'L', 'XL', 'XXL'];
+const sizeCounts = (sizes) => sizes.reduce((o, s) => { o[s] = (o[s] || 0) + 1; return o; }, {});
+function sizeGrid(sizes, isClothes) {
+  const counts = sizeCounts(sizes);
+  const base = as.catSizes?.length ? as.catSizes : isClothes ? CLOTHES_SIZES : as.half ? SHOE_SIZES_HALF : SHOE_SIZES;
+  const all = [...new Set([...base.map((s) => String(s).toUpperCase()), ...Object.keys(counts)])].sort(sizeSort);
+  return `<div class="qty-grid">${all.map((sz) => {
+    const n = counts[sz] || 0;
+    return `<div class="qty-cell ${n ? 'on' : ''}"><button type="button" class="qty-size" data-act="as-size-inc" data-v="${esc(sz)}" aria-label="Sumar una de la talla ${esc(sz)}">${esc(sz)}</button>
+      <div class="qty-ctl"><button type="button" class="qty-b" data-act="as-size-dec" data-v="${esc(sz)}" ${n ? '' : 'disabled'} aria-label="Quitar una de la talla ${esc(sz)}">−</button><b>${n}</b><button type="button" class="qty-b" data-act="as-size-inc" data-v="${esc(sz)}" aria-label="Sumar una de la talla ${esc(sz)}">+</button></div></div>`;
+  }).join('')}</div>`;
+}
+function bumpSize(size, delta) {
+  const counts = sizeCounts(parseSizes(as.sizes));
+  const n = Math.max(0, Math.min(99, (counts[size] || 0) + delta));
+  if (n) counts[size] = n; else delete counts[size];
+  as.sizes = Object.keys(counts).sort(sizeSort).map((s) => (counts[s] > 1 ? `${s}x${counts[s]}` : s)).join(', ');
+  refreshSheet(true);
 }
 const sizesPreview = (sizes) => (sizes.length ? `${sizes.length} ${sizes.length === 1 ? 'unidad' : 'unidades'}: ${[...new Set(sizes)].sort(sizeSort).map((s) => { const n = sizes.filter((x) => x === s).length; return n > 1 ? `${s} ×${n}` : s; }).join(' · ')}` : 'Separa con comas. Usa «x2» si tienes varias de la misma talla.');
 const costHint = (sizes, perUnit) => (as.costMode === 'lot' ? (sizes.length && toNum(as.cost) ? `= ${money(perUnit, true)} por unidad` : 'Se reparte entre todas las unidades.') : sizes.length > 1 && toNum(as.cost) ? `Total: ${money(toNum(as.cost) * sizes.length)}` : '');
@@ -311,10 +333,9 @@ registerActions({
     as.mode = 'new'; refreshSheet(true);
   },
   'as-search': () => { as.mode = 'search'; as.np.image = ''; as.np.stockxSlug = ''; as.catSizes = null; refreshSheet(true); },
-  'as-size': (el) => {
-    as.sizes = [as.sizes.trim(), el.dataset.v].filter(Boolean).join(', ');
-    refreshSheet(true);
-  },
+  'as-size-inc': (el) => bumpSize(el.dataset.v, 1),
+  'as-size-dec': (el) => bumpSize(el.dataset.v, -1),
+  'as-half': () => { as.half = !as.half; refreshSheet(true); },
   'as-size-clear': () => { as.sizes = ''; refreshSheet(true); },
   'as-change': () => { as.productId = null; as.mode = 'search'; as.catSizes = null; refreshSheet(true); },
   'as-type': (el) => { as.np.type = el.dataset.v; refreshSheet(true); },
