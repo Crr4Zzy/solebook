@@ -108,9 +108,24 @@ export function syncNow(opts = {}) {
       const localDirty = local > (cfg.lastPushed || 0);
       if (!remote) {
         await push();
-      } else if (opts.firstConnect && state.meta.isSample) {
-        replaceState(remote.data); // never upload example data over real data
+      } else if (opts.firstConnect && (state.meta.isSample || !state.sales.length && !state.products.length && !state.clients.length)) {
+        replaceState(remote.data); // never upload example or empty data over real data
         cfg.lastRemote = cfg.lastPushed = remote.updated;
+      } else if (opts.firstConnect) {
+        // Both this device and the cloud have real data: the user decides, nothing is merged silently.
+        const cloudN = remote.data?.sales?.length || 0;
+        const useCloud = confirm(
+          `En la nube ya hay datos (${cloudN} ventas) y en este dispositivo también (${state.sales.length} ventas).\n\n`
+          + 'Aceptar: usar los de la nube en este dispositivo (se sustituyen los de aquí).\n'
+          + 'Cancelar: subir los de este dispositivo (se sustituyen los de la nube).',
+        );
+        if (useCloud) {
+          replaceState(remote.data);
+          cfg.lastRemote = cfg.lastPushed = remote.updated;
+        } else {
+          state.meta.lastModified = Date.now();
+          await push();
+        }
       } else if (remote.updated > (cfg.lastRemote || 0) && !(localDirty && local > remote.updated)) {
         replaceState(remote.data);
         cfg.lastRemote = cfg.lastPushed = remote.updated;
