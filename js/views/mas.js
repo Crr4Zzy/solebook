@@ -11,6 +11,7 @@ export function render() {
     <div class="page-head"><h1>Más</h1></div>
     <div class="card more-list"><div class="list">
       ${item('#/ventas', 'receipt', 'Todas las ventas', S.toShip().length ? `<span class="pill warn">${S.toShip().length} por enviar</span>` : '')}
+      <a class="row" href="#" data-act="sales-import">${icon('upload')}<span class="grow">Importar ventas desde Excel</span>${icon('chevR', 'chev')}</a>
       ${item('#/informes', 'chart', 'Informes')}
       ${item('#/ventas?f=cobrar', 'cash', 'Pendiente de cobro', S.totalOwed() ? `<span class="pill warn">${money(S.totalOwed())}</span>` : '')}
       ${item('#/ventas?f=reservas', 'clock', 'Reservas', S.reservations().length ? `<span class="pill accent">${S.reservations().length}</span>` : '')}

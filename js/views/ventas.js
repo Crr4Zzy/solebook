@@ -2,6 +2,7 @@ import { esc, icon, money, signed, currentMonth, addMonths, monthName, matches }
 import * as S from '../store.js';
 import { registerActions, saleRow, empty, monthSwitcher } from '../ui.js';
 import { exportSalesCSV } from '../io.js';
+import { openImport } from '../importer.js';
 
 const f = { month: currentMonth(), all: false, channel: '', status: '', q: '' };
 let lastQueryF = null;
@@ -44,6 +45,7 @@ export function render({ query }) {
   return `
     <div class="page-head">
       <h1>Ventas</h1>
+      <button class="btn" data-act="sales-import">${icon('upload')} <span class="desk-only">Importar Excel</span><span class="mob-only">Importar</span></button>
       <button class="btn desk-only" data-act="sales-export">${icon('download')} Exportar Excel</button>
       <a class="btn primary desk-only" href="#/vender">${icon('plus')} Nueva venta</a>
     </div>
@@ -89,5 +91,6 @@ registerActions({
   },
   'sales-all': () => { f.all = !f.all; rerender(); },
   'sales-channel': (el) => { f.channel = el.value; rerender(); },
+  'sales-import': () => openImport(),
   'sales-export': () => exportSalesCSV(filtered(), `ventas-${f.all || f.status ? 'seleccion' : f.month}.csv`),
 });

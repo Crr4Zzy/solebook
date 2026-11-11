@@ -2,6 +2,7 @@ import { esc, icon, money, signed, fmtDate, matches, waLink } from '../util.js';
 import * as S from '../store.js';
 import { registerActions, avatar, pill, empty, kpi, saleRow, rerender, withUndo, toast, go } from '../ui.js';
 import { openClientForm, openPayment } from '../sheets.js';
+import { openImport } from '../importer.js';
 
 const f = { q: '', filter: '', sort: 'last' };
 let lastQueryF = null;
@@ -76,6 +77,7 @@ export const detail = {
         ${c.phone ? `<a class="btn wa" href="${waLink(c.phone)}" target="_blank" rel="noopener">${icon('wa')} WhatsApp</a><a class="btn" href="tel:${esc(c.phone)}">${icon('phone')} Llamar</a>` : ''}
         ${c.instagram ? `<a class="btn" href="${igLink(c.instagram)}" target="_blank" rel="noopener">${icon('insta')} ${esc(c.instagram)}</a>` : ''}
         <a class="btn primary" href="#/vender?cliente=${id}">${icon('plus')} Nueva venta</a>
+        <button class="btn" data-act="client-import" data-id="${id}">${icon('upload')} Importar ventas</button>
       </div>
       <div class="kpis">
         ${kpi('Compras', st.count, st.last ? `última ${fmtDate(st.last)}` : 'sin compras')}
@@ -134,6 +136,7 @@ registerActions({
   'clients-sort': (el) => { f.sort = el.value; rerender(); },
   'client-new': () => openClientForm(),
   'client-edit': (el) => openClientForm(el.dataset.id),
+  'client-import': (el) => openImport(el.dataset.id),
   'client-pay': (el) => openPayment(el.dataset.id),
   'wish-add': (form) => {
     const text = form.text.value.trim();
