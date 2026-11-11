@@ -2,6 +2,7 @@ import { esc, icon, money, signed, fmtDate, today, toNum, matches, parseSizes, s
 import * as S from '../store.js';
 import { registerActions, productThumb, avatar, pill, empty, kpi, saleRow, rerender, openSheet, refreshSheet, closeSheet, sheetHead, toast, withUndo, go, goThen } from '../ui.js';
 import { shareProductCard } from '../share.js';
+import { salesTable, tableToolbar, filterSales } from '../salestable.js';
 
 const f = { q: '', filter: '' };
 let lastQueryF = null;
@@ -133,12 +134,13 @@ export const detail = {
               ${p.notes ? `<div class="row"><span class="grow muted">Notas</span><span>${esc(p.notes)}</span></div>` : ''}
             </div>
           </div>
-          <div class="card">
-            <div class="card-head"><h2>Últimas ventas</h2><span class="muted small">${sold.length}</span></div>
-            <div class="list">${sold.slice(0, 6).map((s) => saleRow(s)).join('') || '<p class="muted small">Sin ventas todavía.</p>'}</div>
-          </div>
+
           <button class="btn danger block mt" data-act="product-delete" data-id="${id}">${icon('trash')} Borrar producto</button>
         </div>
+      </div>
+      <div class="card mt">
+        <div class="card-head"><h2>Ventas de este modelo</h2><span class="muted small">${sold.length} en total</span></div>
+        ${sold.length ? `${tableToolbar(`product:${id}`, sold)}${salesTable(`product:${id}`, filterSales(sold, `product:${id}`), { showClient: true })}` : '<p class="muted small">Todavía no has vendido ninguno.</p>'}
       </div>`;
   },
 };

@@ -3,6 +3,7 @@ import * as S from '../store.js';
 import { registerActions, avatar, pill, empty, kpi, saleRow, rerender, withUndo, toast, go } from '../ui.js';
 import { openClientForm, openPayment } from '../sheets.js';
 import { openImport } from '../importer.js';
+import { salesTable, tableToolbar, filterSales } from '../salestable.js';
 
 const f = { q: '', filter: '', sort: 'last' };
 let lastQueryF = null;
@@ -90,12 +91,13 @@ export const detail = {
         <div class="list">${owedSales.map((s) => `<div class="row"><div class="grow"><div class="title">${esc(S.productName(S.product(s.productId)))} · ${esc(s.size)}</div><div class="meta">${fmtDate(s.date)} · pagado ${money(S.salePaid(s))} de ${money(s.price)}</div></div>
           <button class="btn sm primary" data-act="client-pay" data-id="${s.id}">Cobrar ${money(S.saleOwed(s))}</button></div>`).join('')}</div></div>` : ''}
 
-      <div class="grid wide-left">
-        <div class="card">
-          <div class="card-head"><h2>Historial</h2><span class="muted small">${st.count}</span></div>
-          <div class="list">${st.sales.map((s) => saleRow(s, { showClient: false })).join('') || '<p class="muted small">Todavía no te ha comprado nada.</p>'}</div>
-        </div>
-        <div>
+      <div class="card mb">
+        <div class="card-head"><h2>Sus ventas</h2><span class="muted small">${st.count} en total</span></div>
+        ${st.count ? `${tableToolbar(`client:${id}`, st.sales)}${salesTable(`client:${id}`, filterSales(st.sales, `client:${id}`), { showClient: false })}`
+          : `<p class="muted small">Todavía no te ha comprado nada. <a href="#/vender?cliente=${id}">Registrar venta</a> o <a href="#" data-act="client-import" data-id="${id}">importar desde Excel</a>.</p>`}
+      </div>
+
+      <div class="grid cols-3">
           <div class="card">
             <div class="card-head"><h2>Busca</h2></div>
             <div class="list">${(c.wishes || []).map((w) => {
@@ -111,7 +113,7 @@ export const detail = {
               <button class="btn icon-only" type="submit" aria-label="Añadir">${icon('plus')}</button>
             </form>
           </div>
-          ${c.notes ? `<div class="card"><h3 class="mb">Notas</h3><p class="small">${esc(c.notes)}</p></div>` : ''}
+          <div class="card"><h3 class="mb">Notas</h3><p class="small ${c.notes ? '' : 'muted'}">${c.notes ? esc(c.notes) : 'Sin notas. Añádelas desde el lápiz de arriba.'}</p></div>
           <div class="card">
             <div class="list">
               ${c.phone ? `<div class="row"><span class="muted">${icon('phone', 'sm')}</span><span class="grow">${esc(c.phone)}</span></div>` : ''}
@@ -120,7 +122,6 @@ export const detail = {
             </div>
             <button class="btn danger block mt" data-act="client-delete" data-id="${id}">${icon('trash')} Borrar cliente</button>
           </div>
-        </div>
       </div>`;
   },
 };

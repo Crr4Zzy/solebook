@@ -312,6 +312,57 @@ export function deleteSale(id) {
   });
 }
 
+// ---------- bulk changes (one update, so one undo) ----------
+// patch may hold: delivery, channel (fees are recalculated), method, clientId, date
+export function bulkEditSales(ids, patch) {
+  const set = new Set(ids);
+  update((st) => {
+    st.sales.forEach((s) => {
+      if (!set.has(s.id)) return;
+      if (patch.delivery) {
+        s.delivery = patch.delivery;
+        if (patch.delivery === 'reservado') s.reservedUntil = s.reservedUntil || addDays(today(), st.settings.reserveDays || 3);
+        else s.reservedUntil = null;
+      }
+      if (patch.channel && patch.channel !== s.channel) {
+        s.channel = patch.channel;
+        s.fees = calcFees(patch.channel, s.price);
+      }
+      if (patch.method) {
+        s.method = patch.method;
+        (s.payments || []).forEach((p) => { p.method = patch.method; });
+      }
+      if (patch.clientId !== undefined) s.clientId = patch.clientId || null;
+      if (patch.date) s.date = patch.date;
+    });
+  });
+}
+
+// Adds a payment for whatever each sale still owes.
+export function bulkMarkPaid(ids, method = '', date = today()) {
+  const set = new Set(ids);
+  let n = 0, total = 0;
+  update((st) => {
+    st.sales.forEach((s) => {
+      if (!set.has(s.id)) return;
+      const owed = saleOwed(s);
+      if (owed <= 0) return;
+      s.payments = s.payments || [];
+      s.payments.push({ id: uid(), date, amount: owed, method: method || s.method || '' });
+      n++; total += owed;
+    });
+  });
+  return { n, total };
+}
+
+export function bulkDeleteSales(ids) {
+  const set = new Set(ids);
+  update((st) => {
+    st.units.forEach((u) => { if (u.saleId && set.has(u.saleId)) u.saleId = null; });
+    st.sales = st.sales.filter((s) => !set.has(s.id));
+  });
+}
+
 export function addPayment(saleId, amount, method, date = today()) {
   update((st) => {
     const s = byId(st.sales, saleId);

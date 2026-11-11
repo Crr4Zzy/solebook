@@ -3,6 +3,7 @@ import * as S from '../store.js';
 import { registerActions, saleRow, empty, monthSwitcher } from '../ui.js';
 import { exportSalesCSV } from '../io.js';
 import { openImport } from '../importer.js';
+import { salesTable } from '../salestable.js';
 
 const f = { month: currentMonth(), all: false, channel: '', status: '', q: '' };
 let lastQueryF = null;
@@ -64,11 +65,8 @@ export function render({ query }) {
     </div>
     <div class="card">
       ${list.length ? `
-        <div class="table">
-          <div class="thead"><span style="width:34px"></span><span class="grow" style="flex:1">Producto</span><span class="col-size">Talla</span><span class="col-chan">Canal</span><span class="col-date">Fecha</span><span class="col-num">Precio</span><span class="col-num">Neto</span><span class="col-status">Estado</span></div>
-          <div class="list">${list.map((s) => saleRow(s, { table: true })).join('')}</div>
-        </div>
-        <div class="row" style="justify-content:space-between;margin-top:4px"><span class="muted small">${list.length} ${list.length === 1 ? 'venta' : 'ventas'} · ${money(total)}</span><span class="small">Neto <b class="${net >= 0 ? 'ok-text' : 'danger-text'}">${signed(net)}</b></span></div>`
+        <div class="row" style="justify-content:space-between;border:none;padding-top:0"><span class="muted small">${list.length} ${list.length === 1 ? 'venta' : 'ventas'} · ${money(total)}</span><span class="small">Neto <b class="${net >= 0 ? 'ok-text' : 'danger-text'}">${signed(net)}</b></span></div>
+        ${salesTable('ventas', list, { showClient: true })}`
         : empty('receipt', f.q || f.status || f.channel ? 'Nada con estos filtros' : `Sin ventas en ${monthName(f.month).toLowerCase()}`, f.q || f.status || f.channel ? 'Prueba a quitar algún filtro.' : 'Cuando vendas algo aparecerá aquí.', '<a class="btn primary" href="#/vender">Registrar venta</a>')}
     </div>
     <button class="btn block mt mob-only" data-act="sales-export">${icon('download')} Exportar a Excel (CSV)</button>`;
