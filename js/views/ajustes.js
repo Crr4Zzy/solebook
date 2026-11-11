@@ -1,7 +1,7 @@
 import { esc, icon, toNum, uid, normalize } from '../util.js';
 import * as S from '../store.js';
 import { registerActions, rerender, toast } from '../ui.js';
-import { SETUP_SQL, connect, disconnect, syncNow, getConfig, getStatus } from '../sync.js';
+import { connect, disconnect, syncNow, getConfig, getStatus } from '../sync.js';
 import { downloadBackup, readBackup, exportSalesCSV } from '../io.js';
 import { catalogKey, setCatalogKey, searchCatalog, catalogThumb } from '../catalog.js';
 
@@ -23,7 +23,7 @@ function catalogCard() {
     </form>`;
 }
 
-let syncForm = { url: '', key: '', email: '', busy: false, error: '', info: '' };
+let syncForm = { email: '', busy: false, error: '', info: '' };
 
 export const title = () => 'Ajustes';
 
@@ -50,23 +50,13 @@ function syncCard() {
       <div class="btn-row"><button class="btn" data-act="sync-now">${icon('refresh')} Sincronizar ahora</button><button class="btn danger" data-act="sync-off">Cerrar sesión</button></div>`;
   }
   const sf = syncForm;
-  return `<p class="small mb">Ahora mismo los datos se guardan <b>solo en este dispositivo</b>. Para tener lo mismo en el móvil y en el PC, conecta una base de datos gratuita de Supabase (se hace una vez, unos 5 minutos):</p>
-    <ol class="small" style="padding-left:18px;margin:0 0 12px">
-      <li>Crea una cuenta en <a href="https://supabase.com" target="_blank" rel="noopener">supabase.com</a> y un proyecto nuevo (plan gratis).</li>
-      <li>En el proyecto, abre <b>SQL Editor</b>, pega esto y pulsa <b>Run</b>:
-        <div class="code mt mb" id="sql">${esc(SETUP_SQL)}</div>
-        <button class="btn sm mb" data-act="copy-sql">${icon('file', 'sm')} Copiar</button></li>
-      <li>En <b>Project Settings → API</b> copia la <b>Project URL</b> y la clave <b>anon public</b> y pégalas aquí.</li>
-      <li>Crea tu usuario con tu email y una contraseña. En el otro dispositivo, repite el paso 3 y pulsa «Entrar».</li>
-    </ol>
+  return `<p class="small mb">Ahora mismo los datos se guardan <b>solo en este dispositivo</b>. Para tener lo mismo en el móvil y en el PC, entra con tu cuenta (o créala la primera vez) y usa la misma en todos tus dispositivos.</p>
     <form data-submit="sync-connect">
-      <div class="field"><label for="sb-url">Project URL</label><input class="input" id="sb-url" name="url" value="${esc(sf.url)}" placeholder="https://xxxx.supabase.co" autocapitalize="off" autocomplete="off" inputmode="url"></div>
-      <div class="field"><label for="sb-key">Clave anon public</label><input class="input" id="sb-key" name="key" value="${esc(sf.key)}" placeholder="eyJhbGciOi…" autocapitalize="off" autocomplete="off"></div>
       <div class="two"><div class="field"><label for="sb-email">Tu email</label><input class="input" id="sb-email" name="email" type="email" value="${esc(sf.email)}" autocomplete="username"></div>
       <div class="field"><label for="sb-pass">Contraseña</label><input class="input" id="sb-pass" name="password" type="password" autocomplete="current-password" minlength="6"></div></div>
       ${sf.error ? `<p class="error mb">${esc(sf.error)}</p>` : ''}${sf.info ? `<p class="small ok-text mb">${esc(sf.info)}</p>` : ''}
       <div class="btn-row"><button class="btn primary" type="submit" name="mode" value="login" ${sf.busy ? 'disabled' : ''}>Entrar</button>
-      <button class="btn" type="submit" name="mode" value="signup" ${sf.busy ? 'disabled' : ''}>Crear usuario</button></div>
+      <button class="btn" type="submit" name="mode" value="signup" ${sf.busy ? 'disabled' : ''}>Crear cuenta</button></div>
     </form>`;
 }
 
@@ -202,28 +192,29 @@ registerActions({
   },
   theme: (el) => S.saveSettings({ theme: el.dataset.v }),
   'toggle-market': (el) => S.saveSettings({ showMarket: el.checked }),
-  'copy-sql': async () => {
-    try { await navigator.clipboard.writeText(SETUP_SQL); toast('Copiado'); } catch { toast('Selecciona el texto y cópialo'); }
-  },
   'sync-connect': async (el, e) => {
     const d = form(el);
     const mode = e.submitter?.value || 'login';
-    syncForm = { url: d.url.trim(), key: d.key.trim(), email: d.email.trim(), busy: true, error: '', info: '' };
-    if (!/^https:\/\/.+/.test(syncForm.url) || !syncForm.key || !syncForm.email || (d.password || '').length < 6) {
+    syncForm = { email: d.email.trim(), busy: true, error: '', info: '' };
+    if (!syncForm.email || (d.password || '').length < 6) {
       syncForm.busy = false;
-      syncForm.error = 'Rellena la URL (https://…), la clave, el email y una contraseña de al menos 6 caracteres.';
+      syncForm.error = 'Escribe tu email y una contraseña de al menos 6 caracteres.';
       rerender();
       return;
     }
     rerender();
     try {
-      const r = await connect({ ...syncForm, password: d.password, signup: mode === 'signup' });
+      const r = await connect({ email: syncForm.email, password: d.password, signup: mode === 'signup' });
       syncForm.busy = false;
-      if (r.needsConfirm) syncForm.info = 'Usuario creado. Abre el email de confirmación que te ha enviado Supabase y luego pulsa «Entrar».';
-      else { syncForm = { url: '', key: '', email: '', busy: false, error: '', info: '' }; toast('Conectado. Sincronizando…'); }
+      if (r.needsConfirm) syncForm.info = 'Cuenta creada. Revisa tu email para confirmarla y luego pulsa «Entrar».';
+      else { syncForm = { email: '', busy: false, error: '', info: '' }; toast('Conectado. Sincronizando…'); }
     } catch (err) {
       syncForm.busy = false;
-      syncForm.error = /invalid login/i.test(err.message) ? 'Email o contraseña incorrectos (o falta confirmar el email).' : /fetch/i.test(err.message) ? 'No se puede conectar con esa URL.' : err.message;
+      const m = err.message || '';
+      syncForm.error = /invalid login/i.test(m) ? 'Email o contraseña incorrectos.'
+        : /already registered/i.test(m) ? 'Ese email ya tiene cuenta: pulsa «Entrar».'
+        : /signups? (not allowed|disabled)/i.test(m) ? 'Ahora mismo no se pueden crear cuentas nuevas.'
+        : /fetch|network/i.test(m) ? 'No hay conexión con el servidor. Inténtalo de nuevo.' : m;
     }
     rerender();
   },

@@ -1,7 +1,11 @@
-// Optional sync between devices through the user's own Supabase project.
+// Optional sync between devices through the owner's Supabase project.
 // The whole dataset is stored as one JSON row per user, protected by row level security.
-// Newest change wins. The config (URL, key, session) lives only on this device.
+// Newest change wins. Only the session lives on this device; the project URL and the
+// publishable key are fixed here (the publishable key is public by design: RLS protects the data).
 import { state, idbGet, idbSet, replaceState, subscribe } from './store.js';
+
+const SUPABASE_URL = 'https://viyhyaqkimsasiyprshu.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_lFvL81TOidjddjZT3BeXag_zgJz_pIF';
 
 export const SETUP_SQL = `create table if not exists public.solebook_data (
   user_id uuid primary key default auth.uid() references auth.users on delete cascade,
@@ -10,7 +14,8 @@ export const SETUP_SQL = `create table if not exists public.solebook_data (
 );
 alter table public.solebook_data enable row level security;
 create policy "solo mis datos" on public.solebook_data
-  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);`;
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+grant select, insert, update, delete on public.solebook_data to authenticated;`;
 
 let cfg = null; // { url, key, email, session: { access_token, refresh_token, expires_at, user_id }, lastRemote, lastPushed }
 let status = { state: 'off', message: 'Sin sincronizar', at: null };
@@ -41,8 +46,8 @@ const keepSession = (d) => {
   cfg.session = { access_token: d.access_token, refresh_token: d.refresh_token, expires_at: d.expires_at || Math.floor(Date.now() / 1000) + (d.expires_in || 3600), user_id: d.user?.id };
 };
 
-export async function connect({ url, key, email, password, signup = false }) {
-  cfg = { url: url.trim(), key: key.trim(), email: email.trim(), session: null, lastRemote: 0, lastPushed: 0 };
+export async function connect({ email, password, signup = false }) {
+  cfg = { url: SUPABASE_URL, key: SUPABASE_KEY, email: email.trim(), session: null, lastRemote: 0, lastPushed: 0 };
   if (signup) {
     const d = await authRequest('signup', { email: cfg.email, password });
     if (!d.access_token) {
@@ -144,6 +149,9 @@ export function syncNow(opts = {}) {
 let pushTimer;
 export async function initSync() {
   cfg = (await idbGet('sync').catch(() => null)) || null;
+  // A session saved against another project (old manual setup) is dropped; otherwise use the fixed project.
+  if (cfg && cfg.url !== SUPABASE_URL) { cfg = null; await idbSet('sync', null).catch(() => {}); }
+  if (cfg) cfg.key = SUPABASE_KEY;
   subscribe((source) => {
     if (source !== 'local' || !cfg?.session) return;
     clearTimeout(pushTimer);
